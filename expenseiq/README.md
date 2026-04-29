@@ -227,8 +227,8 @@ Sample row: `2024-04-01 | Grocery | 3200 | expense | food | Weekly shop`
 ### Step 1 — Create Flutter project
 
 ```bash
-flutter create expenseiq --org com.yourname
-cd expenseiq
+flutter create flutter_app --org com.yourname
+cd flutter_app
 ```
 
 ### Step 2 — Replace pubspec.yaml
