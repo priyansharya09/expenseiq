@@ -52,7 +52,7 @@ class BulkTransactionSerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=['income', 'expense'])
     category = serializers.CharField(max_length=50, default='other')
     date = serializers.DateField(input_formats=['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y'])
-    note = serializers.CharField(max_length=500, required=False, default='')
+    note = serializers.CharField(max_length=500, required=False, default='', allow_blank=True)
 
     def validate_amount(self, value):
         if value <= 0:

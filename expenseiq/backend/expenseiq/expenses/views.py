@@ -203,7 +203,13 @@ def _row_to_dict(mapping, values):
     row = {}
     for field, idx in mapping.items():
         if idx < len(values):
-            row[field] = str(values[idx]).strip() if values[idx] is not None else ''
+            val = values[idx]
+            if val is None:
+                row[field] = ''
+            elif hasattr(val, 'strftime'):
+                row[field] = val.strftime('%Y-%m-%d')
+            else:
+                row[field] = str(val).strip()
     return row
 
 

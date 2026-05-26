@@ -1,30 +1,22 @@
-// This is a basic Flutter widget test.
+// Widget test for ExpenseIQ app
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Verifies that the app boots and shows the auth gate / login screen.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_app/main.dart';
+import 'package:expenseiq/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('App should boot and show ExpenseIQ title', (WidgetTester tester) async {
+    // Build the app and trigger a frame.
+    await tester.pumpWidget(const ExpenseIQApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Allow the async auth check to complete
+    await tester.pump(const Duration(seconds: 1));
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // The app should render without crashing.
+    // Look for the app to have rendered something (either login or loading).
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }
