@@ -67,8 +67,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -78,7 +80,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Transactions', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  Text('Transactions', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: colors.textPrimary)),
                   Row(
                     children: [
                       _buildIconButton(
@@ -105,7 +107,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                   controller: _searchCtrl,
                   decoration: InputDecoration(
                     hintText: 'Search transactions...',
-                    prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
+                    prefixIcon: Icon(Icons.search, color: colors.textMuted),
                     suffixIcon: _searchCtrl.text.isNotEmpty
                         ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _searchCtrl.clear(); _loadTransactions(); })
                         : null,
@@ -140,20 +142,20 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text(_error!, style: const TextStyle(color: AppColors.textSecondary)),
+                              Text(_error!, style: TextStyle(color: colors.textSecondary)),
                               const SizedBox(height: 12),
                               ElevatedButton(onPressed: _loadTransactions, child: const Text('Retry')),
                             ],
                           ),
                         )
                       : _transactions.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.receipt_long_outlined, size: 64, color: AppColors.textMuted),
-                                  SizedBox(height: 16),
-                                  Text('No transactions found', style: TextStyle(color: AppColors.textSecondary, fontSize: 16)),
+                                  Icon(Icons.receipt_long_outlined, size: 64, color: colors.textMuted),
+                                  const SizedBox(height: 16),
+                                  Text('No transactions found', style: TextStyle(color: colors.textSecondary, fontSize: 16)),
                                 ],
                               ),
                             )
@@ -173,6 +175,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                                     categoryIcon: tx.categoryIcon,
                                     date: tx.date,
                                     note: tx.note,
+                                    sharedAmount: tx.sharedAmount,
+                                    paymentMode: tx.paymentMode,
+                                    paymentApp: tx.paymentApp,
                                     onDelete: () => _deleteTransaction(tx.id),
                                     onTap: () => widget.onEditTransaction?.call(tx),
                                   );
@@ -188,6 +193,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
 
   Widget _buildFilterChip(String label, String? type) {
     final isSelected = _filterType == type;
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: () {
         setState(() => _filterType = type);
@@ -197,14 +204,14 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : AppColors.card,
+          color: isSelected ? AppColors.primary : colors.card,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? AppColors.primary : AppColors.border, width: 0.5),
+          border: Border.all(color: isSelected ? AppColors.primary : colors.border, width: 0.5),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.white : AppColors.textSecondary,
+            color: isSelected ? Colors.white : colors.textSecondary,
             fontSize: 13,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
           ),
@@ -214,16 +221,18 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   Widget _buildIconButton({required IconData icon, required VoidCallback onTap}) {
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: 40, height: 40,
         decoration: BoxDecoration(
-          color: AppColors.card,
+          color: colors.card,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border, width: 0.5),
+          border: Border.all(color: colors.border, width: 0.5),
         ),
-        child: Icon(icon, color: AppColors.textSecondary, size: 20),
+        child: Icon(icon, color: colors.textSecondary, size: 20),
       ),
     );
   }

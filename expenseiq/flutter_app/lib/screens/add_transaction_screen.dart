@@ -3,6 +3,7 @@ import 'package:expenseiq/config/theme.dart';
 import 'package:expenseiq/services/api_service.dart';
 import 'package:expenseiq/models/transaction.dart';
 import 'package:intl/intl.dart';
+import 'package:expenseiq/services/app_detector_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? existingTransaction;
@@ -25,13 +26,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   List<CategoryModel> _categories = [];
   bool _isLoading = false;
   bool _isSaving = false;
+  final _sharedAmountCtrl = TextEditingController();
+  String? _paymentMode;
+  String? _paymentApp;
+  List<Map<String, String>> _paymentModes = [];
+  List<UpiAppInfo> _upiApps = [];
 
   bool get isEditing => widget.existingTransaction != null;
 
   @override
   void initState() {
     super.initState();
+    _paymentModes = AppDetectorService.getPaymentModes();
     _loadCategories();
+    _loadUpiApps();
     if (isEditing) {
       final tx = widget.existingTransaction!;
       _nameCtrl.text = tx.name;
@@ -40,7 +48,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _type = tx.type;
       _categoryId = tx.categoryId;
       _date = DateTime.tryParse(tx.date) ?? DateTime.now();
+      _sharedAmountCtrl.text = tx.sharedAmount > 0 ? tx.sharedAmount.toStringAsFixed(0) : '';
+      _paymentMode = tx.paymentMode;
+      _paymentApp = tx.paymentApp;
     }
+  }
+
+  Future<void> _loadUpiApps() async {
+    final apps = await AppDetectorService.getInstalledUpiApps();
+    if (mounted) setState(() => _upiApps = apps);
   }
 
   @override
@@ -48,6 +64,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _nameCtrl.dispose();
     _amountCtrl.dispose();
     _noteCtrl.dispose();
+    _sharedAmountCtrl.dispose();
     super.dispose();
   }
 
@@ -59,7 +76,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (_categoryId == null && _categories.isNotEmpty) {
         _categoryId = _categories.first.id;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Failed to load categories: $e');
+    }
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -75,6 +94,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         'category': _categoryId,
         'date': DateFormat('yyyy-MM-dd').format(_date),
         'note': _noteCtrl.text.trim(),
+        'shared_amount': _sharedAmountCtrl.text.trim().isEmpty ? 0 : double.tryParse(_sharedAmountCtrl.text.trim()),
+        'payment_mode': _paymentMode,
+        'payment_app': _paymentApp,
       };
 
       if (isEditing) {
@@ -97,6 +119,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Future<void> _pickDate() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final picked = await showDatePicker(
       context: context,
       initialDate: _date,
@@ -104,10 +127,17 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       lastDate: DateTime.now(),
       builder: (context, child) {
         return Theme(
-          data: ThemeData.dark().copyWith(
-            colorScheme: const ColorScheme.dark(
+          data: (isDark ? ThemeData.dark() : ThemeData.light()).copyWith(
+            colorScheme: ColorScheme(
+              brightness: isDark ? Brightness.dark : Brightness.light,
               primary: AppColors.primary,
-              surface: AppColors.surface,
+              onPrimary: Colors.white,
+              secondary: AppColors.secondary,
+              onSecondary: Colors.white,
+              surface: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+              onSurface: isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+              error: AppColors.expense,
+              onError: Colors.white,
             ),
           ),
           child: child!,
@@ -119,8 +149,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       appBar: AppBar(
         title: Text(isEditing ? 'Edit Transaction' : 'Add Transaction'),
         leading: IconButton(
@@ -141,9 +173,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: AppColors.surface,
+                        color: colors.surface,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border, width: 0.5),
+                        border: Border.all(color: colors.border, width: 0.5),
                       ),
                       child: Row(
                         children: [
@@ -159,18 +191,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     TextFormField(
                       controller: _amountCtrl,
                       keyboardType: TextInputType.number,
-                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textPrimary),
                       textAlign: TextAlign.center,
                       decoration: InputDecoration(
                         hintText: '0',
-                        hintStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: AppColors.textMuted.withValues(alpha: 0.3)),
+                        hintStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.3)),
                         prefixText: '₹ ',
-                        prefixStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: AppColors.textMuted.withValues(alpha: 0.5)),
+                        prefixStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.5)),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
                         filled: true,
-                        fillColor: AppColors.card,
+                        fillColor: colors.card,
                       ),
                       validator: (v) {
                         if (v == null || v.isEmpty) return 'Amount is required';
@@ -184,9 +216,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     // Name field
                     TextFormField(
                       controller: _nameCtrl,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Description',
-                        prefixIcon: Icon(Icons.edit_outlined, color: AppColors.textMuted),
+                        prefixIcon: Icon(Icons.edit_outlined, color: colors.textMuted),
                       ),
                       validator: (v) => v == null || v.isEmpty ? 'Description is required' : null,
                       textInputAction: TextInputAction.next,
@@ -196,11 +228,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     // Category selector
                     DropdownButtonFormField<int>(
                       value: _categoryId,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Category',
-                        prefixIcon: Icon(Icons.category_outlined, color: AppColors.textMuted),
+                        prefixIcon: Icon(Icons.category_outlined, color: colors.textMuted),
                       ),
-                      dropdownColor: AppColors.surface,
+                      dropdownColor: colors.surface,
                       items: _categories.map((cat) {
                         return DropdownMenuItem(
                           value: cat.id,
@@ -219,7 +251,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         child: TextFormField(
                           decoration: InputDecoration(
                             labelText: 'Date',
-                            prefixIcon: const Icon(Icons.calendar_today_outlined, color: AppColors.textMuted),
+                            prefixIcon: Icon(Icons.calendar_today_outlined, color: colors.textMuted),
                             hintText: DateFormat('dd MMM yyyy').format(_date),
                           ),
                           controller: TextEditingController(text: DateFormat('dd MMM yyyy').format(_date)),
@@ -231,12 +263,82 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     // Note field
                     TextFormField(
                       controller: _noteCtrl,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Note (optional)',
-                        prefixIcon: Icon(Icons.notes_outlined, color: AppColors.textMuted),
+                        prefixIcon: Icon(Icons.notes_outlined, color: colors.textMuted),
                       ),
                       maxLines: 2,
                     ),
+                    const SizedBox(height: 16),
+
+                    if (_type == 'expense') ...[
+                      // Shared Amount field
+                      TextFormField(
+                        controller: _sharedAmountCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Paid for others (Shared amount)',
+                          prefixIcon: Icon(Icons.people_outline, color: colors.textMuted),
+                        ),
+                        validator: (v) {
+                          if (v != null && v.isNotEmpty) {
+                            final n = double.tryParse(v);
+                            final total = double.tryParse(_amountCtrl.text) ?? 0;
+                            if (n == null || n < 0) return 'Invalid amount';
+                            if (n > total) return 'Cannot exceed total amount';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Payment Mode selector
+                      DropdownButtonFormField<String>(
+                        value: _paymentMode,
+                        decoration: InputDecoration(
+                          labelText: 'Payment Mode',
+                          prefixIcon: Icon(Icons.payment, color: colors.textMuted),
+                        ),
+                        dropdownColor: colors.surface,
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('None')),
+                          ..._paymentModes.map((mode) {
+                            return DropdownMenuItem(
+                              value: mode['key'],
+                              child: Text('${mode['icon']} ${mode['label']}'),
+                            );
+                          }),
+                        ],
+                        onChanged: (v) => setState(() {
+                          _paymentMode = v;
+                          if (_paymentMode != 'upi') _paymentApp = null;
+                        }),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // UPI App selector
+                      if (_paymentMode == 'upi' && _upiApps.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: _paymentApp,
+                          decoration: InputDecoration(
+                            labelText: 'UPI App',
+                            prefixIcon: Icon(Icons.apps, color: colors.textMuted),
+                          ),
+                          dropdownColor: colors.surface,
+                          items: [
+                            const DropdownMenuItem(value: null, child: Text('Other')),
+                            ..._upiApps.map((app) {
+                              return DropdownMenuItem(
+                                value: app.name,
+                                child: Text('${app.icon} ${app.name}'),
+                              );
+                            }),
+                          ],
+                          onChanged: (v) => setState(() => _paymentApp = v),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    ],
                     const SizedBox(height: 32),
 
                     // Save button
@@ -265,6 +367,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Widget _buildTypeButton(String label, String type, IconData icon, Color color) {
     final isSelected = _type == type;
+    final colors = AppColors.of(context);
+
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _type = type),
@@ -279,10 +383,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: isSelected ? color : AppColors.textMuted, size: 20),
+              Icon(icon, color: isSelected ? color : colors.textMuted, size: 20),
               const SizedBox(width: 8),
               Text(label, style: TextStyle(
-                color: isSelected ? color : AppColors.textMuted,
+                color: isSelected ? color : colors.textMuted,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               )),
             ],

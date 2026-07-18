@@ -65,8 +65,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadData,
@@ -82,13 +84,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   Widget _buildError() {
+    final colors = AppColors.of(context);
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.cloud_off_rounded, size: 64, color: AppColors.textMuted),
+          Icon(Icons.cloud_off_rounded, size: 64, color: colors.textMuted),
           const SizedBox(height: 16),
-          Text(_error!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 16)),
+          Text(_error!, style: TextStyle(color: colors.textSecondary, fontSize: 16)),
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: _loadData,
@@ -101,6 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   Widget _buildContent() {
+    final colors = AppColors.of(context);
     final income = double.tryParse(_summary?['total_income']?.toString() ?? '0') ?? 0;
     final expense = double.tryParse(_summary?['total_expense']?.toString() ?? '0') ?? 0;
     final balance = income - expense;
@@ -118,12 +123,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               children: [
                 Text(
                   'Hello! 👋',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
+                  style: TextStyle(color: colors.textSecondary, fontSize: 15),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   DateFormat('MMMM yyyy').format(DateTime.now()),
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: colors.textPrimary),
                 ),
               ],
             ),
@@ -131,11 +136,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: AppColors.card,
+                color: colors.card,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border, width: 0.5),
+                border: Border.all(color: colors.border, width: 0.5),
               ),
-              child: const Icon(Icons.notifications_outlined, color: AppColors.textSecondary, size: 22),
+              child: Icon(Icons.notifications_outlined, color: colors.textSecondary, size: 22),
             ),
           ],
         ),
@@ -178,7 +183,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
         // Category breakdown
         if (catBreakdown.isNotEmpty) ...[
-          const Text('Expense Breakdown', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          Text('Expense Breakdown', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
           const SizedBox(height: 16),
           SizedBox(
             height: 200,
@@ -187,13 +192,23 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           const SizedBox(height: 28),
         ],
 
+        // Daily spending trend
+        if (_summary?['daily_spending'] != null && (_summary!['daily_spending'] as List).isNotEmpty) ...[
+          _buildLineChart(_summary!['daily_spending'] as List),
+          const SizedBox(height: 28),
+        ],
+
+        // Insights
+        _buildInsights(_summary),
+        const SizedBox(height: 28),
+
         // Recent transactions
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
             if (_recentTransactions.isNotEmpty)
-              Text('${_recentTransactions.length} items', style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+              Text('${_recentTransactions.length} items', style: TextStyle(color: colors.textMuted, fontSize: 13)),
           ],
         ),
         const SizedBox(height: 12),
@@ -202,17 +217,17 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: AppColors.card,
+              color: colors.card,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border, width: 0.5),
+              border: Border.all(color: colors.border, width: 0.5),
             ),
-            child: const Column(
+            child: Column(
               children: [
-                Icon(Icons.receipt_long_outlined, size: 48, color: AppColors.textMuted),
-                SizedBox(height: 12),
-                Text('No transactions yet', style: TextStyle(color: AppColors.textSecondary, fontSize: 15)),
-                SizedBox(height: 4),
-                Text('Tap + to add your first one', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                Icon(Icons.receipt_long_outlined, size: 48, color: colors.textMuted),
+                const SizedBox(height: 12),
+                Text('No transactions yet', style: TextStyle(color: colors.textSecondary, fontSize: 15)),
+                const SizedBox(height: 4),
+                Text('Tap + to add your first one', style: TextStyle(color: colors.textMuted, fontSize: 13)),
               ],
             ),
           )
@@ -230,8 +245,137 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
+  Widget _buildInsights(Map<String, dynamic>? summary) {
+    if (summary == null) return const SizedBox.shrink();
+    final colors = AppColors.of(context);
+    
+    final comparison = summary['comparison'] as Map<String, dynamic>?;
+    final avgDaily = double.tryParse(summary['avg_daily_expense']?.toString() ?? '0') ?? 0;
+    
+    if (comparison == null) return const SizedBox.shrink();
+    
+    final expenseChange = double.tryParse(comparison['expense_change_pct']?.toString() ?? '0') ?? 0;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+        const SizedBox(height: 12),
+        _buildInsightCard(
+          icon: Icons.auto_graph,
+          title: 'Daily Average',
+          subtitle: 'You spend ₹${avgDaily.toStringAsFixed(0)} on average per day this month.',
+          color: AppColors.primary,
+        ),
+        const SizedBox(height: 8),
+        _buildInsightCard(
+          icon: expenseChange > 0 ? Icons.trending_up : Icons.trending_down,
+          title: 'Expense Trend',
+          subtitle: expenseChange > 0 
+              ? 'Your expenses are up by ${expenseChange.toStringAsFixed(1)}% compared to last month.'
+              : 'Great job! Expenses are down by ${expenseChange.abs().toStringAsFixed(1)}% from last month.',
+          color: expenseChange > 0 ? AppColors.expense : AppColors.income,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInsightCard({required IconData icon, required String title, required String subtitle, required Color color}) {
+    final colors = AppColors.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: colors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(subtitle, style: TextStyle(color: colors.textSecondary, fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLineChart(List<dynamic> dailySpending) {
+    if (dailySpending.isEmpty) return const SizedBox.shrink();
+    final colors = AppColors.of(context);
+    
+    final spots = dailySpending.map((e) {
+      final day = double.tryParse(e['day']?.toString() ?? '0') ?? 0;
+      final amount = double.tryParse(e['amount']?.toString() ?? '0') ?? 0;
+      return FlSpot(day, amount);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Daily Spending Trend', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+        const SizedBox(height: 24),
+        SizedBox(
+          height: 180,
+          child: LineChart(
+            LineChartData(
+              gridData: const FlGridData(show: false),
+              titlesData: FlTitlesData(
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 22,
+                    interval: 5,
+                    getTitlesWidget: (value, meta) {
+                      return Text(
+                        value.toInt().toString(),
+                        style: TextStyle(color: colors.textMuted, fontSize: 11),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: spots,
+                  isCurved: true,
+                  color: AppColors.primary,
+                  barWidth: 3,
+                  isStrokeCapRound: true,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    color: AppColors.primary.withValues(alpha: 0.15),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPieChart(List<dynamic> breakdown, double totalExpense) {
-    final colors = [
+    final colors = AppColors.of(context);
+    final pieColors = [
       const Color(0xFF6C63FF), const Color(0xFF00D1FF), const Color(0xFFFF5252),
       const Color(0xFF00E676), const Color(0xFFFFAB40), const Color(0xFFE040FB),
       const Color(0xFF40C4FF), const Color(0xFFFF6E40), const Color(0xFF69F0AE),
@@ -249,7 +393,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 final percentage = totalExpense > 0 ? (amount / totalExpense * 100) : 0;
                 return PieChartSectionData(
                   value: amount,
-                  color: colors[entry.key % colors.length],
+                  color: pieColors[entry.key % pieColors.length],
                   radius: 40,
                   title: '${percentage.toStringAsFixed(0)}%',
                   titleStyle: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
@@ -274,7 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     Container(
                       width: 10, height: 10,
                       decoration: BoxDecoration(
-                        color: colors[entry.key % colors.length],
+                        color: pieColors[entry.key % pieColors.length],
                         borderRadius: BorderRadius.circular(3),
                       ),
                     ),
@@ -282,13 +426,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     Expanded(
                       child: Text(
                         '${cat['category__icon'] ?? '📦'} ${cat['category__name'] ?? 'Other'}',
-                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                        style: TextStyle(color: colors.textSecondary, fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     Text(
                       '₹${_formatAmount(cat['total'])}',
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: colors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),

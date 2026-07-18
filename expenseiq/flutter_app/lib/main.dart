@@ -8,6 +8,11 @@ import 'package:expenseiq/screens/dashboard_screen.dart';
 import 'package:expenseiq/screens/transactions_screen.dart';
 import 'package:expenseiq/screens/add_transaction_screen.dart';
 import 'package:expenseiq/screens/bulk_upload_screen.dart';
+import 'package:expenseiq/screens/splits_screen.dart';
+import 'package:expenseiq/screens/add_debt_screen.dart';
+
+/// Global theme provider instance accessible from anywhere.
+final themeProvider = ThemeProvider();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,15 +26,45 @@ void main() {
   runApp(const ExpenseIQApp());
 }
 
-class ExpenseIQApp extends StatelessWidget {
+class ExpenseIQApp extends StatefulWidget {
   const ExpenseIQApp({super.key});
+
+  @override
+  State<ExpenseIQApp> createState() => _ExpenseIQAppState();
+}
+
+class _ExpenseIQAppState extends State<ExpenseIQApp> {
+  @override
+  void initState() {
+    super.initState();
+    themeProvider.addListener(_onThemeChanged);
+  }
+
+  @override
+  void dispose() {
+    themeProvider.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  void _onThemeChanged() {
+    setState(() {});
+    // Update system UI overlay when theme changes
+    final isDark = themeProvider.isDarkMode;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ExpenseIQ',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeProvider.themeMode,
       home: const AuthGate(),
     );
   }
@@ -64,9 +99,11 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     if (_isChecking) {
       return Scaffold(
-        backgroundColor: AppColors.background,
+        backgroundColor: colors.background,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -139,6 +176,7 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final _dashboardKey = GlobalKey<State>();
   final _transactionsKey = GlobalKey<State>();
+  final _splitsKey = GlobalKey<State>();
 
   void _refreshScreens() {
     setState(() {
@@ -149,8 +187,10 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -164,6 +204,10 @@ class _MainShellState extends State<MainShell> {
               );
               if (result == true) _refreshScreens();
             },
+          ),
+          SplitsScreen(
+            key: _splitsKey,
+            onRefresh: _refreshScreens,
           ),
           _buildProfileTab(),
         ],
@@ -179,10 +223,12 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildBottomBar() {
+    final colors = AppColors.of(context);
+
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border.withValues(alpha: 0.5), width: 0.5)),
+        color: colors.surface,
+        border: Border(top: BorderSide(color: colors.border.withValues(alpha: 0.5), width: 0.5)),
       ),
       child: SafeArea(
         child: Padding(
@@ -193,8 +239,8 @@ class _MainShellState extends State<MainShell> {
               _buildNavItem(0, Icons.dashboard_rounded, 'Home'),
               _buildNavItem(1, Icons.receipt_long_rounded, 'History'),
               const SizedBox(width: 48), // Space for FAB
-              _buildNavItem(2, Icons.person_outline_rounded, 'Profile'),
-              const SizedBox(width: 48),
+              _buildNavItem(2, Icons.people_rounded, 'Splits'),
+              _buildNavItem(3, Icons.person_outline_rounded, 'Profile'),
             ],
           ),
         ),
@@ -204,6 +250,8 @@ class _MainShellState extends State<MainShell> {
 
   Widget _buildNavItem(int index, IconData icon, String label) {
     final isSelected = _currentIndex == index;
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: () => setState(() => _currentIndex = index),
       behavior: HitTestBehavior.opaque,
@@ -213,12 +261,12 @@ class _MainShellState extends State<MainShell> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: isSelected ? AppColors.primary : AppColors.textMuted, size: 24),
+            Icon(icon, color: isSelected ? AppColors.primary : colors.textMuted, size: 24),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? AppColors.primary : AppColors.textMuted,
+                color: isSelected ? AppColors.primary : colors.textMuted,
                 fontSize: 11,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               ),
@@ -230,20 +278,23 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _showAddOptions(BuildContext context) {
+    final colors = AppColors.of(context);
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surface,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
+        final sheetColors = AppColors.of(context);
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.textMuted, borderRadius: BorderRadius.circular(2))),
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: sheetColors.textMuted, borderRadius: BorderRadius.circular(2))),
                 const SizedBox(height: 20),
                 _buildBottomSheetOption(
                   icon: Icons.add_circle_outline_rounded,
@@ -261,10 +312,25 @@ class _MainShellState extends State<MainShell> {
                 ),
                 const SizedBox(height: 12),
                 _buildBottomSheetOption(
+                  icon: Icons.people_outline_rounded,
+                  title: 'Add Split',
+                  subtitle: 'Add a borrow or lend record',
+                  color: AppColors.secondary,
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AddDebtScreen()),
+                    );
+                    if (result == true) _refreshScreens();
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildBottomSheetOption(
                   icon: Icons.upload_file_rounded,
                   title: 'Bulk Upload',
                   subtitle: 'Import from CSV or Excel file',
-                  color: AppColors.secondary,
+                  color: AppColors.income,
                   onTap: () async {
                     Navigator.pop(context);
                     await Navigator.push(
@@ -286,14 +352,16 @@ class _MainShellState extends State<MainShell> {
     required IconData icon, required String title, required String subtitle,
     required Color color, required VoidCallback onTap,
   }) {
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.card,
+          color: colors.card,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 0.5),
+          border: Border.all(color: colors.border, width: 0.5),
         ),
         child: Row(
           children: [
@@ -306,13 +374,13 @@ class _MainShellState extends State<MainShell> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
+                Text(title, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600, fontSize: 15)),
                 const SizedBox(height: 2),
-                Text(subtitle, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                Text(subtitle, style: TextStyle(color: colors.textMuted, fontSize: 12)),
               ],
             ),
             const Spacer(),
-            const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.textMuted, size: 16),
+            Icon(Icons.arrow_forward_ios_rounded, color: colors.textMuted, size: 16),
           ],
         ),
       ),
@@ -320,13 +388,16 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildProfileTab() {
+    final colors = AppColors.of(context);
+    final isDark = themeProvider.isDarkMode;
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Profile', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            Text('Profile', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: colors.textPrimary)),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(20),
@@ -359,7 +430,83 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
             const SizedBox(height: 24),
-            _buildProfileOption(Icons.color_lens_outlined, 'App Theme', 'Dark Mode', onTap: () {}),
+
+            // ─── Theme toggle ──────────────────────────────────────
+            GestureDetector(
+              onTap: () => themeProvider.toggleTheme(),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colors.card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: colors.border, width: 0.5),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                      color: colors.textSecondary,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('App Theme', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w500, fontSize: 15)),
+                          Text(
+                            isDark ? 'Dark Mode' : 'Light Mode',
+                            style: TextStyle(color: colors.textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Animated toggle switch
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      width: 52,
+                      height: 28,
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        gradient: isDark ? AppColors.primaryGradient : null,
+                        color: isDark ? null : const Color(0xFFE0E0E0),
+                      ),
+                      child: AnimatedAlign(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        alignment: isDark ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(11),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.15),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Icon(
+                              isDark ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+                              size: 14,
+                              color: isDark ? AppColors.primary : const Color(0xFFFFA726),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
             _buildProfileOption(Icons.info_outline, 'About', 'Version 1.0.0', onTap: () {}),
             const Spacer(),
             SizedBox(
@@ -385,30 +532,32 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildProfileOption(IconData icon, String title, String subtitle, {VoidCallback? onTap}) {
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.card,
+          color: colors.card,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border, width: 0.5),
+          border: Border.all(color: colors.border, width: 0.5),
         ),
         child: Row(
           children: [
-            Icon(icon, color: AppColors.textSecondary, size: 22),
+            Icon(icon, color: colors.textSecondary, size: 22),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500, fontSize: 15)),
-                  Text(subtitle, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                  Text(title, style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w500, fontSize: 15)),
+                  Text(subtitle, style: TextStyle(color: colors.textMuted, fontSize: 12)),
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.textMuted, size: 14),
+            Icon(Icons.arrow_forward_ios_rounded, color: colors.textMuted, size: 14),
           ],
         ),
       ),

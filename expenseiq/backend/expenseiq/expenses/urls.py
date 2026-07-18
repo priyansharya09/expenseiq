@@ -2,11 +2,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import RegisterView, LogoutView, CategoryViewSet, TransactionViewSet
+from .views import RegisterView, LogoutView, CategoryViewSet, TransactionViewSet, ContactViewSet, DebtRecordViewSet, debt_summary
 
 router = DefaultRouter()
 router.register(r'categories', CategoryViewSet, basename='category')
 router.register(r'transactions', TransactionViewSet, basename='transaction')
+router.register(r'contacts', ContactViewSet, basename='contact')
+router.register(r'debts', DebtRecordViewSet, basename='debt')
 
 urlpatterns = [
     # Auth
@@ -16,5 +18,6 @@ urlpatterns = [
     path('auth/logout/', LogoutView.as_view(), name='logout'),
 
     # Resources
+    path('debts/summary/', debt_summary, name='debt-summary'),
     path('', include(router.urls)),
 ]

@@ -12,21 +12,12 @@ dependencies:
 
   # HTTP & API
   dio: ^5.4.3
-  retrofit: ^4.1.0
-
-  # State Management
-  flutter_riverpod: ^2.5.1
-  riverpod_annotation: ^2.3.5
 
   # Local Storage & Auth
   flutter_secure_storage: ^9.0.0
-  shared_preferences: ^2.2.3
 
   # File Picking (XLS Upload)
   file_picker: ^8.0.3
-
-  # Navigation
-  go_router: ^13.2.0
 
   # Charts
   fl_chart: ^0.67.0
@@ -34,19 +25,17 @@ dependencies:
   # UI
   cupertino_icons: ^1.0.6
   intl: ^0.19.0
-  shimmer: ^3.0.0
-  lottie: ^3.1.0
 
-  # Excel parsing (for preview before upload)
-  excel: ^4.0.2
+  # New features
+  share_plus: ^7.2.2
+  url_launcher: ^6.2.5
+  flutter_contacts: ^1.1.7+1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   build_runner: ^2.4.9
-  retrofit_generator: ^8.1.0
-  riverpod_generator: ^2.4.0
   mockito: ^5.4.4
   mocktail: ^1.0.4
 

@@ -149,6 +149,9 @@ class TransactionCard extends StatelessWidget {
   final String? categoryIcon;
   final String date;
   final String? note;
+  final double? sharedAmount;
+  final String? paymentMode;
+  final String? paymentApp;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
 
@@ -161,6 +164,9 @@ class TransactionCard extends StatelessWidget {
     this.categoryIcon,
     required this.date,
     this.note,
+    this.sharedAmount,
+    this.paymentMode,
+    this.paymentApp,
     this.onTap,
     this.onDelete,
   });
@@ -169,6 +175,8 @@ class TransactionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
     return Dismissible(
       key: Key('$name-$date-$amount'),
       direction: onDelete != null ? DismissDirection.endToStart : DismissDirection.none,
@@ -189,9 +197,9 @@ class TransactionCard extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.card,
+            color: colors.card,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border, width: 0.5),
+            border: Border.all(color: colors.border, width: 0.5),
           ),
           child: Row(
             children: [
@@ -218,8 +226,8 @@ class TransactionCard extends StatelessWidget {
                   children: [
                     Text(
                       name,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
+                      style: TextStyle(
+                        color: colors.textPrimary,
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                       ),
@@ -227,13 +235,38 @@ class TransactionCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      '${categoryName ?? type} • $date',
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          '${categoryName ?? type} • $date',
+                          style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                        ),
+                        if (paymentMode != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                            child: Text(
+                              paymentApp ?? paymentMode!.toUpperCase(),
+                              style: const TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
+                    if (sharedAmount != null && sharedAmount! > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.people_outline, color: AppColors.secondary, size: 12),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Paid for others: ₹${sharedAmount!.toStringAsFixed(0)}',
+                            style: const TextStyle(color: AppColors.secondary, fontSize: 11, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:expenseiq/config/theme.dart';
 import 'package:expenseiq/services/api_service.dart';
 
@@ -56,8 +57,45 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
       await ApiService().register(_usernameCtrl.text.trim(), _emailCtrl.text.trim(), _passwordCtrl.text);
       if (mounted) widget.onRegisterSuccess();
     } catch (e) {
+      String errorMsg = 'Registration failed. Please try again.';
+      
+      if (e is DioException) {
+        // Handle connection errors (phone can't reach server)
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout) {
+          errorMsg = 'Connection timed out. Make sure your phone and laptop are on the same network.';
+        } else if (e.type == DioExceptionType.connectionError) {
+          errorMsg = 'Cannot connect to server. Check that the backend is running and both devices are on the same WiFi.';
+        } else if (e.response != null) {
+          // Parse API error response
+          final data = e.response?.data;
+          if (data is Map) {
+            if (data.containsKey('username')) {
+              errorMsg = data['username'] is List 
+                ? (data['username'] as List).join(' ') 
+                : data['username'].toString();
+            } else if (data.containsKey('email')) {
+              errorMsg = data['email'] is List 
+                ? (data['email'] as List).join(' ') 
+                : data['email'].toString();
+            } else if (data.containsKey('password')) {
+              errorMsg = data['password'] is List 
+                ? (data['password'] as List).join(' ') 
+                : data['password'].toString();
+            } else if (data.containsKey('non_field_errors')) {
+              errorMsg = data['non_field_errors'] is List 
+                ? (data['non_field_errors'] as List).join(' ') 
+                : data['non_field_errors'].toString();
+            } else if (data.containsKey('detail')) {
+              errorMsg = data['detail'].toString();
+            }
+          }
+        }
+      }
+      
       setState(() {
-        _error = 'Registration failed. Username may already exist.';
+        _error = errorMsg;
       });
     } finally {
       if (mounted) setState(() => _isLoading = false);

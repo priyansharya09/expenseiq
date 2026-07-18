@@ -10,6 +10,9 @@ class TransactionModel {
   final String note;
   final String? createdAt;
   final String? updatedAt;
+  final double sharedAmount;
+  final String? paymentMode;
+  final String? paymentApp;
 
   TransactionModel({
     required this.id,
@@ -23,6 +26,9 @@ class TransactionModel {
     this.note = '',
     this.createdAt,
     this.updatedAt,
+    this.sharedAmount = 0.0,
+    this.paymentMode,
+    this.paymentApp,
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
@@ -38,6 +44,9 @@ class TransactionModel {
       note: json['note'] ?? '',
       createdAt: json['created_at'],
       updatedAt: json['updated_at'],
+      sharedAmount: double.tryParse(json['shared_amount']?.toString() ?? '0') ?? 0.0,
+      paymentMode: json['payment_mode'],
+      paymentApp: json['payment_app'],
     );
   }
 
@@ -49,11 +58,16 @@ class TransactionModel {
       'category': categoryId,
       'date': date,
       'note': note,
+      if (sharedAmount > 0) 'shared_amount': sharedAmount.toStringAsFixed(2),
+      if (paymentMode != null) 'payment_mode': paymentMode,
+      if (paymentApp != null) 'payment_app': paymentApp,
     };
   }
 
   bool get isIncome => type == 'income';
   bool get isExpense => type == 'expense';
+  bool get isShared => sharedAmount > 0;
+  double get selfAmount => amount - sharedAmount;
 }
 
 class CategoryModel {

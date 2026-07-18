@@ -13,7 +13,7 @@ class ApiService {
   // ─── Base URL Configuration ──────────────────────────────────────
   // Change this IP to your laptop's hotspot/WiFi IP address.
   // Find it by running `ipconfig` (Windows) or `ifconfig` (Mac/Linux).
-  static const String _physicalDeviceIp = '10.216.61.211';
+  static const String _physicalDeviceIp = '192.168.138.211';
 
   static String get baseUrl {
     if (kIsWeb) {
@@ -174,6 +174,10 @@ class ApiService {
 
   Future<List<dynamic>> getCategories() async {
     final response = await dio.get('/categories/');
+    // DRF pagination wraps results in {count, next, previous, results}
+    if (response.data is Map && response.data.containsKey('results')) {
+      return response.data['results'];
+    }
     return response.data;
   }
 
@@ -184,4 +188,58 @@ class ApiService {
     final response = await dio.post('/transactions/bulk-upload/', data: formData);
     return response.data;
   }
+
+  // ── Contacts ──
+  Future<Response> getContacts() async {
+    return await dio.get('/contacts/');
+  }
+
+  Future<Response> createContact(Map<String, dynamic> data) async {
+    return await dio.post('/contacts/', data: data);
+  }
+
+  Future<Response> updateContact(int id, Map<String, dynamic> data) async {
+    return await dio.patch('/contacts/$id/', data: data);
+  }
+
+  Future<Response> deleteContact(int id) async {
+    return await dio.delete('/contacts/$id/');
+  }
+
+  Future<Response> getContactBalance(int contactId) async {
+    return await dio.get('/contacts/$contactId/balance/');
+  }
+
+  // ── Debts ──
+  Future<Response> getDebts({int? contactId, bool? settled}) async {
+    final params = <String, dynamic>{};
+    if (contactId != null) params['contact'] = contactId;
+    if (settled != null) params['settled'] = settled.toString();
+    return await dio.get('/debts/', queryParameters: params);
+  }
+
+  Future<Response> createDebt(Map<String, dynamic> data) async {
+    return await dio.post('/debts/', data: data);
+  }
+
+  Future<Response> updateDebt(int id, Map<String, dynamic> data) async {
+    return await dio.patch('/debts/$id/', data: data);
+  }
+
+  Future<Response> deleteDebt(int id) async {
+    return await dio.delete('/debts/$id/');
+  }
+
+  Future<Response> settleDebt(int id) async {
+    return await dio.post('/debts/$id/settle/');
+  }
+
+  Future<Response> settleAllDebts(int contactId) async {
+    return await dio.post('/debts/settle_all/', data: {'contact_id': contactId});
+  }
+
+  Future<Response> getDebtSummary() async {
+    return await dio.get('/debts/summary/');
+  }
 }
+
