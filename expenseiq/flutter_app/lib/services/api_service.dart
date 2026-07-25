@@ -11,22 +11,27 @@ class ApiService {
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   // ─── Base URL Configuration ──────────────────────────────────────
-  // Change this IP to your laptop's hotspot/WiFi IP address.
-  // Find it by running `ipconfig` (Windows) or `ifconfig` (Mac/Linux).
-  static const String _physicalDeviceIp = '192.168.138.211';
+  // The IP is now dynamically injected via start.ps1 or uses 127.0.0.1
+  static const String _envApiHost = String.fromEnvironment('API_HOST');
 
   static String get baseUrl {
     if (kIsWeb) {
       return 'http://localhost:8000/api';
     }
+    
+    // 1. Use dynamically injected IP if provided
+    if (_envApiHost.isNotEmpty) {
+      return 'http://$_envApiHost:8000/api';
+    }
+
     if (Platform.isAndroid) {
-      // 10.0.2.2 is the Android emulator alias for host localhost.
-      // For physical devices, use the laptop's actual IP.
-      return 'http://$_physicalDeviceIp:8000/api';
+      // 2. Fallback for physical devices (Requires: adb reverse tcp:8000 tcp:8000)
+      // For emulator you can use 10.0.2.2 instead.
+      return 'http://127.0.0.1:8000/api';
     } else if (Platform.isIOS) {
       return 'http://localhost:8000/api';
     }
-    return 'http://$_physicalDeviceIp:8000/api';
+    return 'http://127.0.0.1:8000/api';
   }
 
   // ─── Dio Instance ────────────────────────────────────────────────
@@ -159,12 +164,53 @@ class ApiService {
     await dio.delete('/transactions/$id/');
   }
 
-  Future<Map<String, dynamic>> getSummary({int? month, int? year}) async {
+  Future<Map<String, dynamic>> getSummary({
+    int? month,
+    int? year,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final params = <String, dynamic>{};
-    if (month != null) params['month'] = month;
-    if (year != null) params['year'] = year;
+    if (startDate != null && endDate != null) {
+      params['start_date'] = _fmtDate(startDate);
+      params['end_date'] = _fmtDate(endDate);
+    } else {
+      if (month != null) params['month'] = month;
+      if (year != null) params['year'] = year;
+    }
     final response = await dio.get('/transactions/summary/', queryParameters: params);
     return response.data;
+  }
+
+  static String _fmtDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  /// Learned category + payment mode for a transaction name the user typed before.
+  /// Returns an empty map when nothing has been learned yet.
+  Future<Map<String, dynamic>> suggestForName(String name, {String? type}) async {
+    if (name.trim().isEmpty) return {};
+    try {
+      final response = await dio.get('/transactions/suggest/', queryParameters: {
+        'name': name.trim(),
+        if (type != null) 'type': type,
+      });
+      return Map<String, dynamic>.from(response.data ?? {});
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Distinct past transaction names starting with [query], for autocomplete.
+  Future<List<String>> getNameSuggestions(String query) async {
+    try {
+      final response = await dio.get(
+        '/transactions/name-suggestions/',
+        queryParameters: {'q': query},
+      );
+      return List<String>.from(response.data ?? []);
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<List<dynamic>> getMonthlyTrend() async {
@@ -172,13 +218,32 @@ class ApiService {
     return response.data;
   }
 
-  Future<List<dynamic>> getCategories() async {
-    final response = await dio.get('/categories/');
+  /// Categories, optionally narrowed to the ones valid for [kind]
+  /// ('income' or 'expense'). Categories marked 'both' always come back.
+  Future<List<dynamic>> getCategories({String? kind}) async {
+    final response = await dio.get(
+      '/categories/',
+      queryParameters: {if (kind != null) 'kind': kind},
+    );
     // DRF pagination wraps results in {count, next, previous, results}
     if (response.data is Map && response.data.containsKey('results')) {
       return response.data['results'];
     }
     return response.data;
+  }
+
+  Future<Map<String, dynamic>> createCategory(Map<String, dynamic> data) async {
+    final response = await dio.post('/categories/', data: data);
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> updateCategory(int id, Map<String, dynamic> data) async {
+    final response = await dio.patch('/categories/$id/', data: data);
+    return response.data;
+  }
+
+  Future<void> deleteCategory(int id) async {
+    await dio.delete('/categories/$id/');
   }
 
   Future<Map<String, dynamic>> bulkUpload(String filePath) async {
@@ -240,6 +305,86 @@ class ApiService {
 
   Future<Response> getDebtSummary() async {
     return await dio.get('/debts/summary/');
+  }
+
+  // ── Budgets ──
+  /// Budgets for a period, each carrying spent/remaining/pct computed server-side.
+  Future<List<dynamic>> getBudgetStatus({int? month, int? year}) async {
+    final response = await dio.get('/budgets/status/', queryParameters: {
+      if (month != null) 'month': month,
+      if (year != null) 'year': year,
+    });
+    if (response.data is Map && response.data.containsKey('results')) {
+      return response.data['results'];
+    }
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> createBudget(Map<String, dynamic> data) async {
+    final response = await dio.post('/budgets/', data: data);
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> updateBudget(int id, Map<String, dynamic> data) async {
+    final response = await dio.patch('/budgets/$id/', data: data);
+    return response.data;
+  }
+
+  Future<void> deleteBudget(int id) async {
+    await dio.delete('/budgets/$id/');
+  }
+
+  // ── Recurring transactions ──
+  Future<List<dynamic>> getRecurring() async {
+    final response = await dio.get('/recurring/');
+    if (response.data is Map && response.data.containsKey('results')) {
+      return response.data['results'];
+    }
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> createRecurring(Map<String, dynamic> data) async {
+    final response = await dio.post('/recurring/', data: data);
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> updateRecurring(int id, Map<String, dynamic> data) async {
+    final response = await dio.patch('/recurring/$id/', data: data);
+    return response.data;
+  }
+
+  Future<void> deleteRecurring(int id) async {
+    await dio.delete('/recurring/$id/');
+  }
+
+  /// Posts any recurring rules that have come due. Safe to call on app open —
+  /// the server only materializes rules whose next_run has passed.
+  Future<int> runDueRecurring() async {
+    try {
+      final response = await dio.post('/recurring/run-due/');
+      return response.data['posted'] ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ── Export ──
+  /// Raw CSV text of the filtered transactions, for sharing or saving.
+  Future<String> exportTransactionsCsv({
+    int? month, int? year, String? type, String? category, String? search,
+  }) async {
+    final response = await dio.get(
+      '/transactions/export/',
+      queryParameters: {
+        if (month != null) 'month': month,
+        if (year != null) 'year': year,
+        if (type != null) 'type': type,
+        if (category != null) 'category': category,
+        if (search != null) 'search': search,
+      },
+      options: Options(responseType: ResponseType.plain),
+    );
+    return response.data.toString();
   }
 }
 

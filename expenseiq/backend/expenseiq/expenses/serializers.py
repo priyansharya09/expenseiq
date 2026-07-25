@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Transaction, Category, Contact, DebtRecord
+from .models import Transaction, Category, Contact, DebtRecord, Budget, RecurringTransaction
 import datetime
 
 
@@ -29,9 +29,17 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    is_custom = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Category
-        fields = ['id', 'name', 'icon']
+        fields = ['id', 'name', 'icon', 'kind', 'is_custom']
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Category name cannot be empty.')
+        return value
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -131,4 +139,62 @@ class DebtRecordSerializer(serializers.ModelSerializer):
     def validate_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError('Amount must be positive.')
+        return value
+
+
+class BudgetSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_icon = serializers.CharField(source='category.icon', read_only=True)
+    spent = serializers.SerializerMethodField()
+    remaining = serializers.SerializerMethodField()
+    pct = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Budget
+        fields = [
+            'id', 'category', 'category_name', 'category_icon', 'amount',
+            'month', 'year', 'spent', 'remaining', 'pct', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def _spent(self, obj):
+        from django.db.models import Sum
+        qs = Transaction.objects.filter(
+            user=obj.user, type='expense', date__month=obj.month, date__year=obj.year,
+        )
+        if obj.category_id:
+            qs = qs.filter(category_id=obj.category_id)
+        return qs.aggregate(total=Sum('amount'))['total'] or 0
+
+    def get_spent(self, obj):
+        return float(self._spent(obj))
+
+    def get_remaining(self, obj):
+        return float(obj.amount) - float(self._spent(obj))
+
+    def get_pct(self, obj):
+        amount = float(obj.amount)
+        return round(float(self._spent(obj)) / amount * 100, 1) if amount else 0
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Budget amount must be greater than zero.')
+        return value
+
+
+class RecurringTransactionSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_icon = serializers.CharField(source='category.icon', read_only=True)
+
+    class Meta:
+        model = RecurringTransaction
+        fields = [
+            'id', 'name', 'amount', 'type', 'category', 'category_name', 'category_icon',
+            'payment_mode', 'frequency', 'next_run', 'active', 'note', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Amount must be greater than zero.')
         return value

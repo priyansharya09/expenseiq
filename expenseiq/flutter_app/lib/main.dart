@@ -10,6 +10,10 @@ import 'package:expenseiq/screens/add_transaction_screen.dart';
 import 'package:expenseiq/screens/bulk_upload_screen.dart';
 import 'package:expenseiq/screens/splits_screen.dart';
 import 'package:expenseiq/screens/add_debt_screen.dart';
+import 'package:expenseiq/screens/reports_screen.dart';
+import 'package:expenseiq/screens/budgets_screen.dart';
+import 'package:expenseiq/screens/recurring_screen.dart';
+import 'package:expenseiq/widgets/calculator_sheet.dart';
 
 /// Global theme provider instance accessible from anywhere.
 final themeProvider = ThemeProvider();
@@ -178,6 +182,27 @@ class _MainShellState extends State<MainShell> {
   final _transactionsKey = GlobalKey<State>();
   final _splitsKey = GlobalKey<State>();
 
+  @override
+  void initState() {
+    super.initState();
+    // Post any recurring rules that came due while the app was closed, so the
+    // dashboard shows an up-to-date picture on first paint.
+    _postDueRecurring();
+  }
+
+  Future<void> _postDueRecurring() async {
+    final posted = await ApiService().runDueRecurring();
+    if (posted > 0 && mounted) {
+      _refreshScreens();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Posted $posted recurring transaction${posted == 1 ? '' : 's'}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   void _refreshScreens() {
     setState(() {
       // Force rebuild of screens to refresh data
@@ -205,6 +230,7 @@ class _MainShellState extends State<MainShell> {
               if (result == true) _refreshScreens();
             },
           ),
+          const ReportsScreen(),
           SplitsScreen(
             key: _splitsKey,
             onRefresh: _refreshScreens,
@@ -238,9 +264,10 @@ class _MainShellState extends State<MainShell> {
             children: [
               _buildNavItem(0, Icons.dashboard_rounded, 'Home'),
               _buildNavItem(1, Icons.receipt_long_rounded, 'History'),
-              const SizedBox(width: 48), // Space for FAB
-              _buildNavItem(2, Icons.people_rounded, 'Splits'),
-              _buildNavItem(3, Icons.person_outline_rounded, 'Profile'),
+              const SizedBox(width: 40), // Space for FAB
+              _buildNavItem(2, Icons.pie_chart_rounded, 'Reports'),
+              _buildNavItem(3, Icons.people_rounded, 'Splits'),
+              _buildNavItem(4, Icons.person_outline_rounded, 'Profile'),
             ],
           ),
         ),
@@ -257,17 +284,17 @@ class _MainShellState extends State<MainShell> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: isSelected ? AppColors.primary : colors.textMuted, size: 24),
+            Icon(icon, color: isSelected ? AppColors.primary : colors.textMuted, size: 22),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
                 color: isSelected ? AppColors.primary : colors.textMuted,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
@@ -507,6 +534,30 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
 
+            _buildProfileOption(
+              Icons.savings_outlined, 'Budgets', 'Set monthly spending limits',
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BudgetsScreen()),
+                );
+                _refreshScreens();
+              },
+            ),
+            _buildProfileOption(
+              Icons.autorenew_rounded, 'Recurring', 'Rent, salary and subscriptions',
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RecurringScreen()),
+                );
+                _refreshScreens();
+              },
+            ),
+            _buildProfileOption(
+              Icons.calculate_outlined, 'Calculator', 'Quick math without leaving the app',
+              onTap: () => showCalculatorSheet(context),
+            ),
             _buildProfileOption(Icons.info_outline, 'About', 'Version 1.0.0', onTap: () {}),
             const Spacer(),
             SizedBox(

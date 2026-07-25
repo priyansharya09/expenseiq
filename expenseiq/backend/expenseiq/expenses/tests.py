@@ -8,7 +8,7 @@ import datetime
 import io
 import openpyxl
 
-from .models import Transaction, Category
+from .models import Transaction, Category, Budget, RecurringTransaction
 
 
 # ─── Model Tests ────────────────────────────────────────────────────────────────
@@ -18,10 +18,16 @@ class CategoryModelTest(TestCase):
         cat = Category.objects.create(name='food', icon='🍔')
         self.assertEqual(str(cat), 'food')
 
-    def test_category_unique_name(self):
-        Category.objects.create(name='food', icon='🍔')
+    def test_category_unique_name_per_user(self):
+        user = User.objects.create_user('catuser', password='pass12345')
+        Category.objects.create(user=user, name='Snacks', icon='🍔', kind='expense')
         with self.assertRaises(Exception):
-            Category.objects.create(name='food', icon='🍕')
+            Category.objects.create(user=user, name='Snacks', icon='🍕', kind='expense')
+
+    def test_category_kind_default(self):
+        cat = Category.objects.create(name='Misc')
+        self.assertEqual(cat.kind, 'expense')
+        self.assertFalse(cat.is_custom)
 
 
 class TransactionModelTest(TestCase):
@@ -245,3 +251,132 @@ class BulkUploadTest(APITestCase):
         f.name = 'data.pdf'
         res = self.client.post(self.url, {'file': f}, format='multipart')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+# ─── Smart Feature Tests (categories, suggest, reports, export) ──────────────────
+
+class SmartFeatureAPITest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('smartuser', password='smartpass123')
+        self.food = Category.objects.create(name='Food', icon='🍔', kind='expense')
+        self.salary = Category.objects.create(name='Salary', icon='💰', kind='income')
+        self.both = Category.objects.create(name='Misc', icon='📦', kind='both')
+        self.client = APIClient()
+        res = self.client.post('/api/auth/login/', {'username': 'smartuser', 'password': 'smartpass123'})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {res.data["access"]}')
+
+    def _tx(self, **kwargs):
+        defaults = {'user': self.user, 'name': 'Zomato', 'amount': Decimal('300'),
+                    'type': 'expense', 'category': self.food, 'date': datetime.date.today()}
+        defaults.update(kwargs)
+        return Transaction.objects.create(**defaults)
+
+    def test_categories_filtered_by_kind(self):
+        res = self.client.get('/api/categories/?kind=income')
+        names = [c['name'] for c in res.data.get('results', res.data)]
+        self.assertIn('Salary', names)      # income
+        self.assertIn('Misc', names)        # both is always included
+        self.assertNotIn('Food', names)     # pure expense excluded
+
+    def test_create_custom_category(self):
+        res = self.client.post('/api/categories/', {'name': 'Pets', 'icon': '🐾', 'kind': 'expense'})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(res.data['is_custom'])
+        cat = Category.objects.get(name='Pets')
+        self.assertEqual(cat.user, self.user)
+
+    def test_cannot_edit_system_category(self):
+        res = self.client.patch(f'/api/categories/{self.food.id}/', {'name': 'Hacked'})
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_suggest_learns_category_and_payment_mode(self):
+        self._tx(payment_mode='upi')
+        self._tx(payment_mode='upi')
+        self._tx(category=self.both, payment_mode='cash')  # minority
+        res = self.client.get('/api/transactions/suggest/?name=zomato&type=expense')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['category'], self.food.id)
+        self.assertEqual(res.data['payment_mode'], 'upi')
+
+    def test_suggest_unknown_name_returns_empty(self):
+        res = self.client.get('/api/transactions/suggest/?name=neverseen&type=expense')
+        self.assertEqual(res.data, {})
+
+    def test_name_suggestions(self):
+        self._tx(name='Zomato')
+        self._tx(name='Zepto')
+        res = self.client.get('/api/transactions/name-suggestions/?q=ze')
+        self.assertIn('Zepto', res.data)
+        self.assertNotIn('Zomato', res.data)
+
+    def test_summary_date_range(self):
+        self._tx(type='income', category=self.salary, amount=Decimal('1000'),
+                 date=datetime.date(2026, 7, 5))
+        self._tx(type='expense', amount=Decimal('400'), date=datetime.date(2026, 7, 10))
+        self._tx(type='expense', amount=Decimal('999'), date=datetime.date(2026, 8, 1))  # outside
+        res = self.client.get('/api/transactions/summary/?start_date=2026-07-01&end_date=2026-07-31')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['period']['mode'], 'range')
+        self.assertEqual(Decimal(str(res.data['total_expense'])), Decimal('400'))
+        self.assertEqual(Decimal(str(res.data['total_income'])), Decimal('1000'))
+        self.assertTrue(len(res.data['income_category_breakdown']) >= 1)
+
+    def test_export_csv(self):
+        self._tx(name='CoffeeExport')
+        res = self.client.get('/api/transactions/export/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res['Content-Type'], 'text/csv')
+        self.assertIn('CoffeeExport', res.content.decode())
+
+
+class BudgetAPITest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('budgetuser', password='budgetpass123')
+        self.food = Category.objects.create(name='Food', icon='🍔', kind='expense')
+        self.client = APIClient()
+        res = self.client.post('/api/auth/login/', {'username': 'budgetuser', 'password': 'budgetpass123'})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {res.data["access"]}')
+        self.today = datetime.date.today()
+
+    def test_create_and_status(self):
+        Transaction.objects.create(user=self.user, name='Lunch', amount=Decimal('600'),
+                                   type='expense', category=self.food, date=self.today)
+        res = self.client.post('/api/budgets/', {
+            'category': self.food.id, 'amount': '1000',
+            'month': self.today.month, 'year': self.today.year})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        res = self.client.get(f'/api/budgets/status/?month={self.today.month}&year={self.today.year}')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        row = res.data[0]
+        self.assertEqual(float(row['spent']), 600.0)
+        self.assertEqual(float(row['remaining']), 400.0)
+        self.assertEqual(float(row['pct']), 60.0)
+
+
+class RecurringAPITest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('recuser', password='recpass123')
+        self.food = Category.objects.create(name='Food', icon='🍔', kind='expense')
+        self.client = APIClient()
+        res = self.client.post('/api/auth/login/', {'username': 'recuser', 'password': 'recpass123'})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {res.data["access"]}')
+
+    def test_run_due_posts_transaction_and_advances(self):
+        yesterday = datetime.date.today() - datetime.timedelta(days=1)
+        rule = RecurringTransaction.objects.create(
+            user=self.user, name='Netflix', amount=Decimal('199'), type='expense',
+            category=self.food, frequency='monthly', next_run=yesterday, active=True)
+        res = self.client.post('/api/recurring/run-due/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(res.data['posted'], 1)
+        self.assertTrue(Transaction.objects.filter(user=self.user, name='Netflix').exists())
+        rule.refresh_from_db()
+        self.assertGreater(rule.next_run, yesterday)
+
+    def test_inactive_rule_not_posted(self):
+        RecurringTransaction.objects.create(
+            user=self.user, name='Paused', amount=Decimal('50'), type='expense',
+            category=self.food, frequency='monthly',
+            next_run=datetime.date.today(), active=False)
+        res = self.client.post('/api/recurring/run-due/')
+        self.assertEqual(res.data['posted'], 0)

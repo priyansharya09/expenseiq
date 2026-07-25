@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:expenseiq/config/theme.dart';
 import 'package:expenseiq/services/api_service.dart';
 import 'package:expenseiq/models/transaction.dart';
 import 'package:intl/intl.dart';
 import 'package:expenseiq/services/app_detector_service.dart';
+import 'package:expenseiq/widgets/calculator_sheet.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? existingTransaction;
@@ -32,14 +35,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   List<Map<String, String>> _paymentModes = [];
   List<UpiAppInfo> _upiApps = [];
 
+  // ─── Category memory ────────────────────────────────────────────
+  /// Debounces the suggest lookup so we don't hit the API on every keystroke.
+  Timer? _suggestDebounce;
+
+  /// Name we last auto-filled from, so we don't repeat the same lookup.
+  String _lastSuggestedFor = '';
+
+  /// Set when the category was chosen by the memory feature rather than by
+  /// the user, so we can show the "auto-filled" hint and safely overwrite it.
+  bool _categoryWasAutoFilled = false;
+
   bool get isEditing => widget.existingTransaction != null;
+
+  /// Categories valid for the currently selected type ('both' always applies).
+  List<CategoryModel> get _visibleCategories =>
+      _categories.where((c) => c.matches(_type)).toList();
 
   @override
   void initState() {
     super.initState();
     _paymentModes = AppDetectorService.getPaymentModes();
-    _loadCategories();
-    _loadUpiApps();
     if (isEditing) {
       final tx = widget.existingTransaction!;
       _nameCtrl.text = tx.name;
@@ -51,7 +67,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _sharedAmountCtrl.text = tx.sharedAmount > 0 ? tx.sharedAmount.toStringAsFixed(0) : '';
       _paymentMode = tx.paymentMode;
       _paymentApp = tx.paymentApp;
+      // Editing an existing row means the category is already deliberate.
+      _lastSuggestedFor = tx.name.trim().toLowerCase();
     }
+    _loadCategories();
+    _loadUpiApps();
+    _nameCtrl.addListener(_onNameChanged);
   }
 
   Future<void> _loadUpiApps() async {
@@ -61,6 +82,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   @override
   void dispose() {
+    _suggestDebounce?.cancel();
+    _nameCtrl.removeListener(_onNameChanged);
     _nameCtrl.dispose();
     _amountCtrl.dispose();
     _noteCtrl.dispose();
@@ -68,18 +91,94 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     super.dispose();
   }
 
+  // ─── Smart category memory ──────────────────────────────────────
+
+  void _onNameChanged() {
+    _suggestDebounce?.cancel();
+    _suggestDebounce = Timer(const Duration(milliseconds: 450), _applySuggestion);
+  }
+
+  /// Looks up what category (and payment mode) this user picked the last few
+  /// times they entered a transaction with this exact name, and fills it in.
+  /// Never overrides a choice the user made by hand.
+  Future<void> _applySuggestion({bool force = false}) async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return;
+
+    final key = name.toLowerCase();
+    if (!force && key == _lastSuggestedFor) return;
+    _lastSuggestedFor = key;
+
+    final suggestion = await ApiService().suggestForName(name, type: _type);
+    if (!mounted || suggestion.isEmpty) return;
+    // The user may have kept typing while the request was in flight.
+    if (_nameCtrl.text.trim().toLowerCase() != key) return;
+
+    final suggestedCategory = suggestion['category'] as int?;
+    final suggestedMode = suggestion['payment_mode'] as String?;
+
+    // Only auto-fill a field the user hasn't deliberately set.
+    final canSetCategory = _categoryId == null || _categoryWasAutoFilled;
+    final categoryIsValid = suggestedCategory != null &&
+        _visibleCategories.any((c) => c.id == suggestedCategory);
+
+    if (!(canSetCategory && categoryIsValid) && suggestedMode == null) return;
+
+    setState(() {
+      if (canSetCategory && categoryIsValid) {
+        _categoryId = suggestedCategory;
+        _categoryWasAutoFilled = true;
+      }
+      if (suggestedMode != null && _paymentMode == null && _type == 'expense') {
+        _paymentMode = suggestedMode;
+      }
+    });
+  }
+
+  Future<void> _openCalculator() async {
+    FocusScope.of(context).unfocus();
+    final current = double.tryParse(_amountCtrl.text.trim());
+    final result = await showCalculatorSheet(context, initial: current);
+    if (result != null && mounted) {
+      setState(() {
+        _amountCtrl.text = result == result.roundToDouble()
+            ? result.toStringAsFixed(0)
+            : result.toStringAsFixed(2);
+      });
+    }
+  }
+
+  /// Switching income/expense changes which categories apply, so drop a
+  /// selection that no longer belongs to the new side.
+  void _onTypeChanged(String type) {
+    if (_type == type) return;
+    setState(() {
+      _type = type;
+      if (_categoryId != null && !_visibleCategories.any((c) => c.id == _categoryId)) {
+        _categoryId = null;
+        _categoryWasAutoFilled = false;
+      }
+      if (type == 'income') {
+        _paymentMode = null;
+        _paymentApp = null;
+        _sharedAmountCtrl.clear();
+      }
+    });
+    // Category memory is tracked per type, so re-run the lookup.
+    _applySuggestion(force: true);
+  }
+
   Future<void> _loadCategories() async {
     setState(() => _isLoading = true);
     try {
       final data = await ApiService().getCategories();
       _categories = data.map((e) => CategoryModel.fromJson(e)).toList();
-      if (_categoryId == null && _categories.isNotEmpty) {
-        _categoryId = _categories.first.id;
-      }
     } catch (e) {
       debugPrint('Failed to load categories: $e');
     }
     if (mounted) setState(() => _isLoading = false);
+    // With categories in hand we can now resolve a remembered one.
+    if (!isEditing) _applySuggestion(force: true);
   }
 
   Future<void> _save() async {
@@ -187,59 +286,146 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // Amount field (large)
-                    TextFormField(
-                      controller: _amountCtrl,
-                      keyboardType: TextInputType.number,
-                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textPrimary),
-                      textAlign: TextAlign.center,
-                      decoration: InputDecoration(
-                        hintText: '0',
-                        hintStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.3)),
-                        prefixText: '₹ ',
-                        prefixStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.5)),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        filled: true,
-                        fillColor: colors.card,
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Amount is required';
-                        final n = double.tryParse(v);
-                        if (n == null || n <= 0) return 'Enter a valid amount';
-                        return null;
-                      },
+                    // Amount field (large) with calculator shortcut
+                    Stack(
+                      alignment: Alignment.centerRight,
+                      children: [
+                        TextFormField(
+                          controller: _amountCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textPrimary),
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            hintText: '0',
+                            hintStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.3)),
+                            prefixText: '₹ ',
+                            prefixStyle: TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: colors.textMuted.withValues(alpha: 0.5)),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: true,
+                            fillColor: colors.card,
+                            contentPadding: const EdgeInsets.only(left: 48, right: 48, top: 16, bottom: 16),
+                          ),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Amount is required';
+                            final n = double.tryParse(v);
+                            if (n == null || n <= 0) return 'Enter a valid amount';
+                            return null;
+                          },
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: IconButton(
+                            tooltip: 'Calculator',
+                            onPressed: _openCalculator,
+                            icon: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.calculate_rounded, color: AppColors.primary, size: 22),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
 
-                    // Name field
-                    TextFormField(
-                      controller: _nameCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'Description',
-                        prefixIcon: Icon(Icons.edit_outlined, color: colors.textMuted),
-                      ),
-                      validator: (v) => v == null || v.isEmpty ? 'Description is required' : null,
-                      textInputAction: TextInputAction.next,
+                    // Name field — autocompletes from names entered before, and
+                    // picking one pulls in the category learned for it.
+                    Autocomplete<String>(
+                      optionsBuilder: (value) async {
+                        if (value.text.trim().isEmpty) return const <String>[];
+                        return ApiService().getNameSuggestions(value.text.trim());
+                      },
+                      onSelected: (selection) {
+                        _nameCtrl.text = selection;
+                        _applySuggestion(force: true);
+                      },
+                      fieldViewBuilder: (context, textCtrl, focusNode, onSubmit) {
+                        // Keep Autocomplete's internal controller in sync with ours
+                        // so edit-mode prefill and programmatic sets both show up.
+                        if (textCtrl.text != _nameCtrl.text) {
+                          textCtrl.value = _nameCtrl.value;
+                        }
+                        return TextFormField(
+                          controller: textCtrl,
+                          focusNode: focusNode,
+                          onChanged: (v) {
+                            if (_nameCtrl.text != v) _nameCtrl.text = v;
+                          },
+                          decoration: InputDecoration(
+                            labelText: 'Description',
+                            prefixIcon: Icon(Icons.edit_outlined, color: colors.textMuted),
+                            helperText: 'Categories are remembered per description',
+                            helperStyle: TextStyle(color: colors.textMuted, fontSize: 11),
+                          ),
+                          validator: (v) => v == null || v.trim().isEmpty ? 'Description is required' : null,
+                          textInputAction: TextInputAction.next,
+                        );
+                      },
+                      optionsViewBuilder: (context, onSelected, options) {
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Material(
+                            elevation: 4,
+                            borderRadius: BorderRadius.circular(12),
+                            color: colors.surface,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 220),
+                              child: ListView.builder(
+                                padding: EdgeInsets.zero,
+                                shrinkWrap: true,
+                                itemCount: options.length,
+                                itemBuilder: (context, i) {
+                                  final option = options.elementAt(i);
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.history_rounded, size: 18, color: colors.textMuted),
+                                    title: Text(option, style: TextStyle(color: colors.textPrimary)),
+                                    onTap: () => onSelected(option),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 16),
 
-                    // Category selector
+                    // Category selector — only categories valid for the
+                    // selected income/expense side are offered.
                     DropdownButtonFormField<int>(
-                      value: _categoryId,
+                      value: _visibleCategories.any((c) => c.id == _categoryId) ? _categoryId : null,
+                      isExpanded: true,
                       decoration: InputDecoration(
                         labelText: 'Category',
                         prefixIcon: Icon(Icons.category_outlined, color: colors.textMuted),
+                        suffixIcon: _categoryWasAutoFilled
+                            ? Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Icon(Icons.auto_awesome_rounded,
+                                    color: AppColors.primary, size: 18),
+                              )
+                            : null,
+                        helperText: _categoryWasAutoFilled ? 'Auto-selected from your history' : null,
+                        helperStyle: const TextStyle(color: AppColors.primary, fontSize: 11),
                       ),
                       dropdownColor: colors.surface,
-                      items: _categories.map((cat) {
+                      items: _visibleCategories.map((cat) {
                         return DropdownMenuItem(
                           value: cat.id,
                           child: Text('${cat.icon} ${cat.name}'),
                         );
                       }).toList(),
-                      onChanged: (v) => setState(() => _categoryId = v),
+                      onChanged: (v) => setState(() {
+                        _categoryId = v;
+                        // A manual pick outranks the remembered one from here on.
+                        _categoryWasAutoFilled = false;
+                      }),
                       validator: (v) => v == null ? 'Select a category' : null,
                     ),
                     const SizedBox(height: 16),
@@ -371,7 +557,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _type = type),
+        onTap: () => _onTypeChanged(type),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 14),
