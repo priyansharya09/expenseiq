@@ -9,10 +9,10 @@ class TransactionsScreen extends StatefulWidget {
   const TransactionsScreen({super.key, this.onEditTransaction});
 
   @override
-  State<TransactionsScreen> createState() => _TransactionsScreenState();
+  State<TransactionsScreen> createState() => TransactionsScreenState();
 }
 
-class _TransactionsScreenState extends State<TransactionsScreen> {
+class TransactionsScreenState extends State<TransactionsScreen> {
   List<TransactionModel> _transactions = [];
   bool _isLoading = true;
   String? _error;
@@ -30,6 +30,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> refreshData() async {
+    await _loadTransactions();
   }
 
   Future<void> _loadTransactions() async {

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# Coverage
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.env
+key.properties
+upload-keystore.jks
+
+# Flutter
+flutter_app/build/
+flutter_app/.dart_tool/
+flutter_app/.packages
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+
+# Misc
+*.xlsx
+*.xls
+username,password.txt

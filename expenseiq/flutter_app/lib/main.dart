@@ -178,8 +178,9 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-  final _dashboardKey = GlobalKey<State>();
-  final _transactionsKey = GlobalKey<State>();
+  final _dashboardKey = GlobalKey<DashboardScreenState>();
+  final _transactionsKey = GlobalKey<TransactionsScreenState>();
+  final _reportsKey = GlobalKey<ReportsScreenState>();
   final _splitsKey = GlobalKey<State>();
 
   @override
@@ -208,6 +209,9 @@ class _MainShellState extends State<MainShell> {
       // Force rebuild of screens to refresh data
       _currentIndex = _currentIndex;
     });
+    _dashboardKey.currentState?.refreshData();
+    _transactionsKey.currentState?.refreshData();
+    _reportsKey.currentState?.refreshData();
   }
 
   @override
@@ -219,7 +223,11 @@ class _MainShellState extends State<MainShell> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          DashboardScreen(key: _dashboardKey),
+          DashboardScreen(
+            key: _dashboardKey,
+            onSeeAllTransactions: () => setState(() => _currentIndex = 1),
+            onSeeInsights: () => setState(() => _currentIndex = 2),
+          ),
           TransactionsScreen(
             key: _transactionsKey,
             onEditTransaction: (tx) async {
@@ -230,7 +238,7 @@ class _MainShellState extends State<MainShell> {
               if (result == true) _refreshScreens();
             },
           ),
-          const ReportsScreen(),
+          ReportsScreen(key: _reportsKey),
           SplitsScreen(
             key: _splitsKey,
             onRefresh: _refreshScreens,

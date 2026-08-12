@@ -1,0 +1,1 @@
+web: cd expenseiq && gunicorn expenseiq.wsgi --bind 0.0.0.0:$PORT

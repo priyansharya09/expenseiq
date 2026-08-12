@@ -7,13 +7,20 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? onSeeAllTransactions;
+  final VoidCallback? onSeeInsights;
+
+  const DashboardScreen({
+    super.key,
+    this.onSeeAllTransactions,
+    this.onSeeInsights,
+  });
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  State<DashboardScreen> createState() => DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
+class DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _summary;
   List<TransactionModel> _recentTransactions = [];
   bool _isLoading = true;
@@ -31,6 +38,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   void dispose() {
     _animController.dispose();
     super.dispose();
+  }
+
+  Future<void> refreshData() async {
+    await _loadData();
   }
 
   Future<void> _loadData() async {
@@ -199,17 +210,31 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         ],
 
         // Insights
-        _buildInsights(_summary),
+        GestureDetector(
+          onTap: widget.onSeeInsights,
+          behavior: HitTestBehavior.opaque,
+          child: _buildInsights(_summary),
+        ),
         const SizedBox(height: 28),
 
         // Recent transactions
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
-            if (_recentTransactions.isNotEmpty)
-              Text('${_recentTransactions.length} items', style: TextStyle(color: colors.textMuted, fontSize: 13)),
-          ],
+        GestureDetector(
+          onTap: widget.onSeeAllTransactions,
+          behavior: HitTestBehavior.opaque,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+              Row(
+                children: [
+                  if (_recentTransactions.isNotEmpty)
+                    Text('${_recentTransactions.length} items', style: TextStyle(color: colors.textMuted, fontSize: 13)),
+                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_forward_ios_rounded, size: 14, color: colors.textMuted),
+                ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
 
@@ -259,7 +284,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Insights', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+            Icon(Icons.arrow_forward_ios_rounded, size: 14, color: colors.textMuted),
+          ],
+        ),
         const SizedBox(height: 12),
         _buildInsightCard(
           icon: Icons.auto_graph,

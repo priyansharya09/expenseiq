@@ -14,10 +14,10 @@ class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
   @override
-  State<ReportsScreen> createState() => _ReportsScreenState();
+  State<ReportsScreen> createState() => ReportsScreenState();
 }
 
-class _ReportsScreenState extends State<ReportsScreen> {
+class ReportsScreenState extends State<ReportsScreen> {
   ReportRange _range = ReportRange.thisMonth;
   DateTime _anchor = DateTime.now(); // month/year being viewed
   DateTimeRange? _customRange;
@@ -32,6 +32,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> refreshData() async {
+    await _load();
   }
 
   /// Resolves the current selection into the parameters the summary

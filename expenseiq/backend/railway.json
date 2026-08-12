@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "cd expenseiq && DATABASE_URL=sqlite:///db.sqlite3 python manage.py collectstatic --noinput"
+  },
+  "deploy": {
+    "startCommand": "cd expenseiq && python manage.py migrate --noinput && gunicorn expenseiq.wsgi --bind 0.0.0.0:$PORT",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
