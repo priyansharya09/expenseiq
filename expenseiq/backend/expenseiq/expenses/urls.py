@@ -6,6 +6,7 @@ from .views import (
     RegisterView, LogoutView, CategoryViewSet, TransactionViewSet,
     ContactViewSet, DebtRecordViewSet, debt_summary,
     BudgetViewSet, RecurringTransactionViewSet,
+    SplitGroupViewSet, GroupExpenseViewSet,
 )
 
 router = DefaultRouter()
@@ -15,6 +16,8 @@ router.register(r'contacts', ContactViewSet, basename='contact')
 router.register(r'debts', DebtRecordViewSet, basename='debt')
 router.register(r'budgets', BudgetViewSet, basename='budget')
 router.register(r'recurring', RecurringTransactionViewSet, basename='recurring')
+router.register(r'groups', SplitGroupViewSet, basename='group')
+router.register(r'group-expenses', GroupExpenseViewSet, basename='group-expense')
 
 urlpatterns = [
     # Auth

@@ -21,6 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
   final _formKey = GlobalKey<FormState>();
   final _usernameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _isLoading = false;
@@ -44,6 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
     _animController.dispose();
     _usernameCtrl.dispose();
     _emailCtrl.dispose();
+    _phoneCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
@@ -54,7 +56,12 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
     setState(() { _isLoading = true; _error = null; });
 
     try {
-      await ApiService().register(_usernameCtrl.text.trim(), _emailCtrl.text.trim(), _passwordCtrl.text);
+      await ApiService().register(
+        _usernameCtrl.text.trim(),
+        _emailCtrl.text.trim(),
+        _passwordCtrl.text,
+        phone: _phoneCtrl.text.trim(),
+      );
       if (mounted) widget.onRegisterSuccess();
     } catch (e) {
       String errorMsg = 'Registration failed. Please try again.';
@@ -80,9 +87,13 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
                 ? (data['email'] as List).join(' ') 
                 : data['email'].toString();
             } else if (data.containsKey('password')) {
-              errorMsg = data['password'] is List 
-                ? (data['password'] as List).join(' ') 
+              errorMsg = data['password'] is List
+                ? (data['password'] as List).join(' ')
                 : data['password'].toString();
+            } else if (data.containsKey('phone')) {
+              errorMsg = data['phone'] is List
+                ? (data['phone'] as List).join(' ')
+                : data['phone'].toString();
             } else if (data.containsKey('non_field_errors')) {
               errorMsg = data['non_field_errors'] is List 
                 ? (data['non_field_errors'] as List).join(' ') 
@@ -186,6 +197,24 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
                                 decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined, color: AppColors.textMuted)),
                                 keyboardType: TextInputType.emailAddress,
                                 validator: (v) => v == null || v.isEmpty ? 'Email is required' : null,
+                                textInputAction: TextInputAction.next,
+                              ),
+                              const SizedBox(height: 14),
+
+                              TextFormField(
+                                controller: _phoneCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'Phone (for splits)',
+                                  hintText: '10-digit mobile number',
+                                  prefixIcon: Icon(Icons.phone_outlined, color: AppColors.textMuted),
+                                ),
+                                keyboardType: TextInputType.phone,
+                                validator: (v) {
+                                  if (v == null || v.trim().isEmpty) return null; // optional
+                                  final digits = v.replaceAll(RegExp(r'\D'), '');
+                                  if (digits.length < 10) return 'Enter a valid phone number';
+                                  return null;
+                                },
                                 textInputAction: TextInputAction.next,
                               ),
                               const SizedBox(height: 14),

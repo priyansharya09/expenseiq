@@ -49,3 +49,8 @@ flutter_app/.flutter-plugins-dependencies
 *.xlsx
 *.xls
 username,password.txt
+
+# Secrets / local artifacts (never commit)
+*.pem
+username,password.txt
+Screenshot*.png

@@ -97,11 +97,17 @@ class ApiService {
     return response.data;
   }
 
-  Future<Map<String, dynamic>> register(String username, String email, String password) async {
+  Future<Map<String, dynamic>> register(
+    String username,
+    String email,
+    String password, {
+    String phone = '',
+  }) async {
     final response = await dio.post('/auth/register/', data: {
       'username': username,
       'email': email,
       'password': password,
+      if (phone.trim().isNotEmpty) 'phone': phone.trim(),
     });
     await _saveTokens(response.data);
     return response.data;
@@ -299,6 +305,59 @@ class ApiService {
 
   Future<Response> getDebtSummary() async {
     return await dio.get('/debts/summary/');
+  }
+
+  // ── Split Groups ──
+  /// All groups owned by the current user (each includes members, balances, totals).
+  Future<List<dynamic>> getGroups() async {
+    final response = await dio.get('/groups/');
+    if (response.data is Map && response.data.containsKey('results')) {
+      return response.data['results'];
+    }
+    return response.data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getGroup(int id) async {
+    final response = await dio.get('/groups/$id/');
+    return Map<String, dynamic>.from(response.data);
+  }
+
+  /// Create a group. [members] = [{'name':..,'phone':..}, ...] (owner auto-added).
+  Future<Map<String, dynamic>> createGroup(String name, List<Map<String, String>> members) async {
+    final response = await dio.post('/groups/', data: {'name': name, 'members': members});
+    return Map<String, dynamic>.from(response.data);
+  }
+
+  Future<void> deleteGroup(int id) async {
+    await dio.delete('/groups/$id/');
+  }
+
+  Future<Map<String, dynamic>> addGroupMember(int groupId, String name, String phone) async {
+    final response = await dio.post('/groups/$groupId/members/', data: {'name': name, 'phone': phone});
+    return Map<String, dynamic>.from(response.data);
+  }
+
+  Future<void> removeGroupMember(int groupId, int memberId) async {
+    await dio.delete('/groups/$groupId/members/$memberId/');
+  }
+
+  /// Expenses for one group.
+  Future<List<dynamic>> getGroupExpenses(int groupId) async {
+    final response = await dio.get('/group-expenses/', queryParameters: {'group': groupId});
+    if (response.data is Map && response.data.containsKey('results')) {
+      return response.data['results'];
+    }
+    return response.data as List<dynamic>;
+  }
+
+  /// Log a group expense. [shares] = [{'member':id,'amount':'12.50'}, ...].
+  Future<Map<String, dynamic>> createGroupExpense(Map<String, dynamic> data) async {
+    final response = await dio.post('/group-expenses/', data: data);
+    return Map<String, dynamic>.from(response.data);
+  }
+
+  Future<void> deleteGroupExpense(int id) async {
+    await dio.delete('/group-expenses/$id/');
   }
 
   // ── Budgets ──

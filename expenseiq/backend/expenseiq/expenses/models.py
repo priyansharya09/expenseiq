@@ -1,5 +1,14 @@
+import re
 from django.db import models
 from django.contrib.auth.models import User
+
+
+def normalize_phone(raw):
+    """Reduce a phone number to a comparable key: digits only, last 10 (India mobile)."""
+    if not raw:
+        return ''
+    digits = re.sub(r'\D', '', str(raw))
+    return digits[-10:] if len(digits) >= 10 else digits
 
 
 class Category(models.Model):
@@ -171,3 +180,92 @@ class DebtRecord(models.Model):
 
     def __str__(self):
         return f'{self.type}: {self.amount} - {self.contact.name}'
+
+
+# ─── User profile (phone, for group matching / Pass-2 cross-user sync) ───────────
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    phone = models.CharField(max_length=20, blank=True, default='', db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['phone'], condition=~models.Q(phone=''),
+                name='uniq_profile_phone',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} profile'
+
+
+# ─── Split groups (shared expenses among several people) ─────────────────────────
+
+class SplitGroup(models.Model):
+    """A named group (e.g. 'Flat') whose members share expenses."""
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_groups')
+    name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.owner.username})'
+
+
+class GroupMember(models.Model):
+    """A person in a group. May map to a registered app user (linked_user) via phone."""
+    group = models.ForeignKey(SplitGroup, on_delete=models.CASCADE, related_name='members')
+    name = models.CharField(max_length=100)
+    phone = models.CharField(max_length=20, blank=True, default='', help_text='Normalized phone key')
+    linked_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='group_memberships',
+    )
+    is_owner = models.BooleanField(default=False, help_text='The member representing the group creator')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-is_owner', 'name']
+
+    def __str__(self):
+        return f'{self.name} in {self.group.name}'
+
+
+class GroupExpense(models.Model):
+    """An expense logged inside a group, split across its members via ExpenseShare rows."""
+    group = models.ForeignKey(SplitGroup, on_delete=models.CASCADE, related_name='expenses')
+    name = models.CharField(max_length=255)
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_by = models.ForeignKey(GroupMember, on_delete=models.CASCADE, related_name='expenses_paid')
+    date = models.DateField()
+    note = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='logged_group_expenses')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.amount}) in {self.group.name}'
+
+
+class ExpenseShare(models.Model):
+    """How much one member owes for one group expense. Sum of shares == expense amount."""
+    expense = models.ForeignKey(GroupExpense, on_delete=models.CASCADE, related_name='shares')
+    member = models.ForeignKey(GroupMember, on_delete=models.CASCADE, related_name='shares')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['expense', 'member'], name='uniq_expense_member_share'),
+        ]
+
+    def __str__(self):
+        return f'{self.member.name} owes {self.amount} on {self.expense.name}'

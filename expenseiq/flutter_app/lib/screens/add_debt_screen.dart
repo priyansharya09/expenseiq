@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:expenseiq/config/theme.dart';
 import 'package:expenseiq/services/api_service.dart';
 import 'package:expenseiq/models/contact.dart';
@@ -55,26 +56,99 @@ class _AddDebtScreenState extends State<AddDebtScreen> {
   }
 
   Future<void> _pickContactFromPhone() async {
-    if (await fc.FlutterContacts.requestPermission()) {
-      final contact = await fc.FlutterContacts.openExternalPick();
-      if (contact != null) {
-        final name = contact.displayName;
-        final phone = contact.phones.isNotEmpty ? contact.phones.first.number : '';
-        
-        // Add to our backend
-        setState(() => _isSaving = true);
-        try {
-          final response = await ApiService().createContact({'name': name, 'phone': phone});
-          final newContact = ContactModel.fromJson(response.data);
-          setState(() {
-            _contacts.add(newContact);
-            _contactId = newContact.id;
-          });
-        } catch (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add contact')));
+    try {
+      final granted = await fc.FlutterContacts.requestPermission(readonly: true);
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Contacts permission denied. Add the contact manually instead.')),
+          );
         }
-        setState(() => _isSaving = false);
+        return;
       }
+      final contact = await fc.FlutterContacts.openExternalPick();
+      if (contact == null) return;
+      final name = contact.displayName;
+      final phone = contact.phones.isNotEmpty ? contact.phones.first.number : '';
+      await _createAndSelectContact(name, phone);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open phone contacts. Add the contact manually instead.')),
+        );
+      }
+    }
+  }
+
+  /// Manual contact entry — the reliable path that does not depend on the
+  /// phone's contacts permission or picker being available.
+  Future<void> _addManualContact() async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('New Contact', style: TextStyle(color: AppColors.textPrimary)),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Name', prefixIcon: Icon(Icons.person_outline, color: AppColors.textMuted)),
+                validator: (v) => v == null || v.trim().isEmpty ? 'Name required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone (optional)', prefixIcon: Icon(Icons.phone_outlined, color: AppColors.textMuted)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved == true) {
+      await _createAndSelectContact(nameCtrl.text.trim(), phoneCtrl.text.trim());
+    }
+  }
+
+  Future<void> _createAndSelectContact(String name, String phone) async {
+    setState(() => _isSaving = true);
+    try {
+      final response = await ApiService().createContact({'name': name, 'phone': phone});
+      final newContact = ContactModel.fromJson(response.data);
+      setState(() {
+        _contacts.add(newContact);
+        _contactId = newContact.id;
+      });
+    } catch (e) {
+      if (mounted) {
+        String msg = 'Failed to add contact';
+        if (e is DioException && e.response?.data is Map) {
+          final data = e.response!.data as Map;
+          if (data['name'] is List) msg = (data['name'] as List).join(' ');
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -188,24 +262,43 @@ class _AddDebtScreenState extends State<AddDebtScreen> {
                         Expanded(
                           child: DropdownButtonFormField<int>(
                             value: _contactId,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Contact',
                               prefixIcon: Icon(Icons.person_outline, color: AppColors.textMuted),
                             ),
                             dropdownColor: AppColors.surface,
-                            items: _contacts.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
+                            items: _contacts
+                                .map((c) => DropdownMenuItem(
+                                      value: c.id,
+                                      child: Text(c.name, overflow: TextOverflow.ellipsis),
+                                    ))
+                                .toList(),
                             onChanged: (v) => setState(() => _contactId = v),
                             validator: (v) => v == null ? 'Required' : null,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         IconButton(
-                          onPressed: _pickContactFromPhone,
-                          icon: const Icon(Icons.contact_phone, color: AppColors.primary),
-                          tooltip: 'Pick from Phone',
+                          onPressed: _isSaving ? null : _addManualContact,
+                          icon: const Icon(Icons.person_add_alt_1, color: AppColors.primary),
+                          tooltip: 'Add new contact',
+                        ),
+                        IconButton(
+                          onPressed: _isSaving ? null : _pickContactFromPhone,
+                          icon: const Icon(Icons.contact_phone, color: AppColors.secondary),
+                          tooltip: 'Pick from phone',
                         ),
                       ],
                     ),
+                    if (_contacts.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'No contacts yet — tap the person-add icon to create one.',
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        ),
+                      ),
                     const SizedBox(height: 16),
                     
                     // Description

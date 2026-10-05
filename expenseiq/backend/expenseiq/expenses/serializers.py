@@ -1,15 +1,21 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Transaction, Category, Contact, DebtRecord, Budget, RecurringTransaction
+from decimal import Decimal
+from .models import (
+    Transaction, Category, Contact, DebtRecord, Budget, RecurringTransaction,
+    UserProfile, SplitGroup, GroupMember, GroupExpense, ExpenseShare,
+    normalize_phone,
+)
 import datetime
 
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True, default='')
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password', 'phone']
 
     def validate_username(self, value):
         """Validate that username is unique"""
@@ -23,9 +29,27 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This email is already registered.")
         return value
 
+    def validate_phone(self, value):
+        """Normalize and ensure the phone isn't already registered."""
+        norm = normalize_phone(value)
+        if norm and UserProfile.objects.filter(phone=norm).exists():
+            raise serializers.ValidationError("This phone number is already registered.")
+        return norm
+
     def create(self, validated_data):
+        phone = validated_data.pop('phone', '')
         user = User.objects.create_user(**validated_data)
+        UserProfile.objects.create(user=user, phone=phone)
+        # Link any group memberships that were waiting on this phone number.
+        if phone:
+            GroupMember.objects.filter(phone=phone, linked_user__isnull=True).update(linked_user=user)
         return user
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        profile = getattr(instance, 'profile', None)
+        data['phone'] = profile.phone if profile else ''
+        return data
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -198,3 +222,159 @@ class RecurringTransactionSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError('Amount must be greater than zero.')
         return value
+
+
+# ─── Split Group serializers ─────────────────────────────────────────────────────
+
+class GroupMemberSerializer(serializers.ModelSerializer):
+    is_app_user = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GroupMember
+        fields = ['id', 'name', 'phone', 'is_owner', 'linked_user', 'is_app_user']
+        read_only_fields = ['id', 'is_owner', 'linked_user']
+
+    def get_is_app_user(self, obj):
+        return obj.linked_user_id is not None
+
+
+class ExpenseShareSerializer(serializers.ModelSerializer):
+    member_name = serializers.CharField(source='member.name', read_only=True)
+
+    class Meta:
+        model = ExpenseShare
+        fields = ['id', 'member', 'member_name', 'amount']
+        read_only_fields = ['id']
+
+
+class GroupExpenseSerializer(serializers.ModelSerializer):
+    shares = ExpenseShareSerializer(many=True)
+    paid_by_name = serializers.CharField(source='paid_by.name', read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_icon = serializers.CharField(source='category.icon', read_only=True)
+
+    class Meta:
+        model = GroupExpense
+        fields = [
+            'id', 'group', 'name', 'category', 'category_name', 'category_icon',
+            'amount', 'paid_by', 'paid_by_name', 'date', 'note', 'shares', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Amount must be greater than zero.')
+        return value
+
+    def validate(self, data):
+        request = self.context.get('request')
+        group = data.get('group') or getattr(self.instance, 'group', None)
+        if request and group and group.owner_id != request.user.id:
+            raise serializers.ValidationError('You do not have access to this group.')
+
+        paid_by = data.get('paid_by') or getattr(self.instance, 'paid_by', None)
+        if group and paid_by and paid_by.group_id != group.id:
+            raise serializers.ValidationError({'paid_by': 'Payer is not a member of this group.'})
+
+        shares = data.get('shares')
+        amount = data.get('amount', getattr(self.instance, 'amount', None))
+        if shares is not None:
+            if not shares:
+                raise serializers.ValidationError({'shares': 'At least one member must be included in the split.'})
+            total = Decimal('0')
+            for s in shares:
+                member = s['member']
+                if group and member.group_id != group.id:
+                    raise serializers.ValidationError({'shares': f'{member.name} is not a member of this group.'})
+                if s['amount'] < 0:
+                    raise serializers.ValidationError({'shares': 'Share amounts cannot be negative.'})
+                total += s['amount']
+            # Allow a cent of rounding slack per member for equal splits.
+            if amount is not None and abs(total - amount) > Decimal('0.01') * len(shares):
+                raise serializers.ValidationError(
+                    {'shares': f'Shares must add up to the total ({amount}); got {total}.'}
+                )
+        return data
+
+    def create(self, validated_data):
+        shares = validated_data.pop('shares')
+        expense = GroupExpense.objects.create(**validated_data)
+        ExpenseShare.objects.bulk_create([
+            ExpenseShare(expense=expense, **s) for s in shares
+        ])
+        return expense
+
+    def update(self, instance, validated_data):
+        shares = validated_data.pop('shares', None)
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
+        instance.save()
+        if shares is not None:
+            instance.shares.all().delete()
+            ExpenseShare.objects.bulk_create([
+                ExpenseShare(expense=instance, **s) for s in shares
+            ])
+        return instance
+
+
+class SplitGroupSerializer(serializers.ModelSerializer):
+    members = GroupMemberSerializer(many=True, required=False)
+    expense_count = serializers.SerializerMethodField()
+    total_spent = serializers.SerializerMethodField()
+    balances = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SplitGroup
+        fields = ['id', 'name', 'members', 'expense_count', 'total_spent', 'balances', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def get_expense_count(self, obj):
+        return obj.expenses.count()
+
+    def get_total_spent(self, obj):
+        from django.db.models import Sum
+        return float(obj.expenses.aggregate(t=Sum('amount'))['t'] or 0)
+
+    def get_balances(self, obj):
+        """Net position per member: (total paid) - (total owed). Positive = others owe them."""
+        from django.db.models import Sum
+        out = []
+        for m in obj.members.all():
+            paid = m.expenses_paid.aggregate(t=Sum('amount'))['t'] or 0
+            owed = m.shares.aggregate(t=Sum('amount'))['t'] or 0
+            out.append({
+                'member': m.id,
+                'name': m.name,
+                'is_owner': m.is_owner,
+                'net': round(float(paid) - float(owed), 2),
+            })
+        return out
+
+    def create(self, validated_data):
+        members = validated_data.pop('members', [])
+        request = self.context.get('request')
+        owner = request.user
+        group = SplitGroup.objects.create(owner=owner, **validated_data)
+
+        owner_profile = getattr(owner, 'profile', None)
+        GroupMember.objects.create(
+            group=group,
+            name=(owner.first_name or owner.username),
+            phone=owner_profile.phone if owner_profile else '',
+            linked_user=owner,
+            is_owner=True,
+        )
+        for m in members:
+            self._create_member(group, m.get('name', ''), m.get('phone', ''))
+        return group
+
+    @staticmethod
+    def _create_member(group, name, phone):
+        norm = normalize_phone(phone)
+        linked = None
+        if norm:
+            profile = UserProfile.objects.filter(phone=norm).select_related('user').first()
+            linked = profile.user if profile else None
+        return GroupMember.objects.create(
+            group=group, name=name, phone=norm, linked_user=linked,
+        )

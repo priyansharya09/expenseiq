@@ -15,12 +15,16 @@ import csv
 import io
 from datetime import date, datetime
 
-from .models import Transaction, Category, Contact, DebtRecord, Budget, RecurringTransaction
+from .models import (
+    Transaction, Category, Contact, DebtRecord, Budget, RecurringTransaction,
+    UserProfile, SplitGroup, GroupMember, GroupExpense, normalize_phone,
+)
 from .serializers import (
     UserSerializer, TransactionSerializer, CategorySerializer,
     BulkTransactionSerializer, MonthlySummarySerializer,
     ContactSerializer, DebtRecordSerializer,
     BudgetSerializer, RecurringTransactionSerializer,
+    SplitGroupSerializer, GroupExpenseSerializer, GroupMemberSerializer,
 )
 
 
@@ -421,6 +425,71 @@ def debt_summary(request):
         'net_balance': total_lent - total_borrowed,
         'active_debts_count': records.count()
     })
+
+
+# ─── Split Group ViewSets ─────────────────────────────────────────────────────
+
+class SplitGroupViewSet(viewsets.ModelViewSet):
+    serializer_class = SplitGroupSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            SplitGroup.objects.filter(owner=self.request.user)
+            .prefetch_related('members', 'expenses')
+        )
+
+    @action(detail=True, methods=['post'], url_path='members')
+    def add_member(self, request, pk=None):
+        group = self.get_object()
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({'error': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+        phone = normalize_phone(request.data.get('phone', ''))
+        linked = None
+        if phone:
+            profile = UserProfile.objects.filter(phone=phone).select_related('user').first()
+            linked = profile.user if profile else None
+        member = GroupMember.objects.create(
+            group=group, name=name, phone=phone, linked_user=linked,
+        )
+        return Response(GroupMemberSerializer(member).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], url_path='members/(?P<member_id>[^/.]+)')
+    def remove_member(self, request, pk=None, member_id=None):
+        group = self.get_object()
+        member = group.members.filter(id=member_id, is_owner=False).first()
+        if not member:
+            return Response(
+                {'error': 'Member not found, or it is the group owner (cannot be removed).'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if member.expenses_paid.exists() or member.shares.exists():
+            return Response(
+                {'error': 'This member is part of existing expenses and cannot be removed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        member.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GroupExpenseViewSet(viewsets.ModelViewSet):
+    serializer_class = GroupExpenseSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = (
+            GroupExpense.objects.filter(group__owner=self.request.user)
+            .select_related('category', 'paid_by', 'group')
+            .prefetch_related('shares')
+        )
+        group_id = self.request.query_params.get('group')
+        if group_id:
+            qs = qs.filter(group_id=group_id)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 # ─── Budget ViewSet ───────────────────────────────────────────────────────────
