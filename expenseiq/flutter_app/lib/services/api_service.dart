@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -11,27 +9,23 @@ class ApiService {
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   // ─── Base URL Configuration ──────────────────────────────────────
-  // The IP is now dynamically injected via start.ps1 or uses 127.0.0.1
+  // Production default: AWS backend over HTTPS.
+  // Local dev override: pass --dart-define=API_HOST=192.168.x.x to hit a
+  // local Django server over http://HOST:8000.
   static const String _envApiHost = String.fromEnvironment('API_HOST');
+  static const String _envApiUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: 'https://expenseiq.duckdns.org/api',
+  );
 
   static String get baseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:8000/api';
-    }
-    
-    // 1. Use dynamically injected IP if provided
+    // 1. Local dev override: --dart-define=API_HOST=<lan-ip>
     if (_envApiHost.isNotEmpty) {
       return 'http://$_envApiHost:8000/api';
     }
 
-    if (Platform.isAndroid) {
-      // 2. Fallback for physical devices (Requires: adb reverse tcp:8000 tcp:8000)
-      // For emulator you can use 10.0.2.2 instead.
-      return 'http://127.0.0.1:8000/api';
-    } else if (Platform.isIOS) {
-      return 'http://localhost:8000/api';
-    }
-    return 'http://127.0.0.1:8000/api';
+    // 2. Default: cloud backend (HTTPS). Overridable with --dart-define=API_URL=...
+    return _envApiUrl;
   }
 
   // ─── Dio Instance ────────────────────────────────────────────────

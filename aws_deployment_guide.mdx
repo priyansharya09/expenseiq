@@ -1,0 +1,431 @@
+# 🚀 ExpenseIQ — AWS Free-Tier Deployment Guide
+
+Move the Django backend off Railway onto **AWS EC2 free tier**. Zero cost for 12 months if you stay inside the limits below. One small server runs everything: PostgreSQL + Gunicorn + Caddy (auto-HTTPS). The Flutter app just points at a new URL.
+
+---
+
+## What you're building
+
+```
+Phone (release APK)
+      │  HTTPS
+      ▼
+ https://expenseiq.duckdns.org        ← free domain
+      │
+ ┌────────────────────────────────────┐
+ │  ONE EC2 instance (t3.micro, free)  │
+ │                                     │
+ │  Caddy  ──►  Gunicorn  ──►  Django  │
+ │  (HTTPS)     (systemd)              │
+ │                                     │
+ │  PostgreSQL (installed on same box) │
+ └────────────────────────────────────┘
+```
+
+Everything lives on one machine. No load balancer, no RDS, no S3 — those add cost or a second free-tier clock. This is the cheapest safe setup.
+
+---
+
+## Cost reality check (read this first)
+
+| Thing | Free-tier limit | Stay safe by |
+|---|---|---|
+| EC2 **t3.micro** | 750 hours/month for **12 months** | Run exactly **one** instance |
+| EBS storage (disk) | 30 GB total for 12 months | Use the default 8–20 GB volume |
+| Data transfer out | 100 GB/month | Personal app never hits this |
+| Elastic IP | Free **while attached** to a running instance | Never leave it unattached |
+| PostgreSQL | $0 — installed on the EC2 box | Don't use RDS (separate clock) |
+
+> [!WARNING]
+> AWS bills you after the 12-month free window, and charges you *immediately* for anything outside free tier (extra instances, RDS, unattached Elastic IPs, NAT gateways). Set a **billing alarm at $1** (covered in Step 9) so you get an email before any real charge lands.
+
+> [!IMPORTANT]
+> `t2.micro` is free-tier in older/some regions, `t3.micro` in most current ones. When you launch, the AWS console labels the free-tier-eligible type with a green **"Free tier eligible"** tag — pick whichever one shows that tag in your region.
+
+---
+
+## Before you start — checklist
+
+- [ ] A credit/debit card (AWS requires one to verify identity; you won't be charged inside free tier)
+- [ ] Your code is pushed to GitHub — it is: `github.com/priyansharya09/expenseiq`
+- [ ] ~45 minutes
+- [ ] This guide open on the side
+
+---
+
+## Step 1 — Create the AWS account
+
+1. Go to **https://aws.amazon.com/free**
+2. Click **Create a Free Account**
+3. Enter email, pick account name `expenseiq`, verify email
+4. Choose **Personal** account type
+5. Enter card details (identity check — a tiny temporary hold may appear, then reverses)
+6. Verify phone via SMS/call
+7. Choose the **Basic support — Free** plan
+8. Sign in to the **AWS Management Console**
+
+> [!TIP]
+> Top-right of the console shows a **Region** (e.g. "N. Virginia"). Pick the region **closest to your users** (for India: **Asia Pacific (Mumbai) ap-south-1**) and keep using that same region for every step. Resources in different regions can't see each other.
+
+---
+
+## Step 2 — Launch the EC2 instance
+
+1. In the console search bar type **EC2** → open it
+2. Click **Launch instance**
+3. Fill in:
+   - **Name:** `expenseiq-server`
+   - **AMI (OS image):** **Ubuntu Server 24.04 LTS** — make sure it says *Free tier eligible*
+   - **Instance type:** `t3.micro` (or `t2.micro`) — the one tagged *Free tier eligible*
+4. **Key pair (login):** click **Create new key pair**
+   - Name: `expenseiq-key`
+   - Type: **RSA**, format **.pem**
+   - Click **Create** → the `expenseiq-key.pem` file downloads. **Keep it safe — it's the only way to SSH in.**
+5. **Network settings** → click **Edit**, then check these boxes:
+   - ✅ Allow **SSH** traffic from **My IP** (so only you can log in)
+   - ✅ Allow **HTTPS** traffic from the internet
+   - ✅ Allow **HTTP** traffic from the internet
+6. **Configure storage:** bump to **20 GiB** gp3 (still free-tier, more room for the DB)
+7. Click **Launch instance** → then **View all instances**
+
+Wait until **Instance state = Running** and **Status checks = 2/2 passed**.
+
+---
+
+## Step 3 — Give it a fixed public IP (Elastic IP)
+
+The default public IP changes every reboot. Pin one so your domain never breaks.
+
+1. EC2 left menu → **Elastic IPs** → **Allocate Elastic IP address** → **Allocate**
+2. Select the new IP → **Actions** → **Associate Elastic IP address**
+3. Choose your `expenseiq-server` instance → **Associate**
+4. Copy this IP — call it **`YOUR_IP`** from here on.
+
+> [!WARNING]
+> An Elastic IP is free **only while associated with a running instance**. If you ever terminate the instance, also **release** the Elastic IP, or AWS charges a small hourly fee for the idle address.
+
+---
+
+## Step 4 — SSH into the server
+
+Open **PowerShell** on your Windows machine, in the folder where the `.pem` downloaded (usually `Downloads`):
+
+```powershell
+cd $HOME\Downloads
+
+# Lock down the key file (Windows requires this or SSH refuses it)
+icacls expenseiq-key.pem /inheritance:r
+icacls expenseiq-key.pem /grant:r "$($env:USERNAME):(R)"
+
+# Connect (replace YOUR_IP)
+ssh -i expenseiq-key.pem ubuntu@YOUR_IP
+```
+
+Type `yes` at the fingerprint prompt. You're now on the server — the prompt looks like `ubuntu@ip-172-...:~$`.
+
+> [!NOTE]
+> Everything from here until Step 8 runs **on the server** (the `ubuntu@...` prompt), not on your PC.
+
+---
+
+## Step 5 — Install system packages
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-venv python3-pip git postgresql postgresql-contrib libpq-dev
+```
+
+---
+
+## Step 6 — Set up PostgreSQL
+
+Create the database and a user for ExpenseIQ:
+
+```bash
+sudo -u postgres psql
+```
+
+Inside the `postgres=#` prompt, run these (change the password to something strong):
+
+```sql
+CREATE DATABASE expenseiq;
+CREATE USER expenseiq_user WITH PASSWORD 'CHANGE_THIS_STRONG_PASSWORD';
+ALTER ROLE expenseiq_user SET client_encoding TO 'utf8';
+ALTER ROLE expenseiq_user SET default_transaction_isolation TO 'read committed';
+ALTER ROLE expenseiq_user SET timezone TO 'Asia/Kolkata';
+GRANT ALL PRIVILEGES ON DATABASE expenseiq TO expenseiq_user;
+\c expenseiq
+GRANT ALL ON SCHEMA public TO expenseiq_user;
+\q
+```
+
+Your `DATABASE_URL` for later is:
+
+```
+postgres://expenseiq_user:CHANGE_THIS_STRONG_PASSWORD@localhost:5432/expenseiq
+```
+
+---
+
+## Step 7 — Deploy the Django code
+
+```bash
+# Clone your repo into the home folder
+cd ~
+git clone https://github.com/priyansharya09/expenseiq.git
+cd expenseiq/expenseiq/backend
+
+# Create and activate a virtualenv
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies (your requirements.txt already has everything)
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+> [!NOTE]
+> Your project layout: the repo root is `~/expenseiq`, the Django backend is at `~/expenseiq/expenseiq/backend`, and `manage.py` lives one level deeper at `~/expenseiq/expenseiq/backend/expenseiq/manage.py`. The commands below account for that nesting.
+
+### Create the environment file
+
+Your `settings.py` already reads config from environment variables. Create a `.env`-style file the systemd service will load:
+
+```bash
+# Generate a fresh Django secret key
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+Copy the printed key, then create the env file:
+
+```bash
+nano ~/expenseiq/expenseiq/backend/expenseiq.env
+```
+
+Paste this (fill in the secret key, DB password, and your domain — set the domain in Step 8, for now put `YOUR_IP`):
+
+```ini
+DJANGO_SECRET_KEY=paste-the-generated-key-here
+DEBUG=False
+ALLOWED_HOSTS=expenseiq.duckdns.org,YOUR_IP,localhost,127.0.0.1
+DATABASE_URL=postgres://expenseiq_user:CHANGE_THIS_STRONG_PASSWORD@localhost:5432/expenseiq
+```
+
+Save in nano: `Ctrl+O`, `Enter`, `Ctrl+X`.
+
+### Run migrations and collect static files
+
+```bash
+cd ~/expenseiq/expenseiq/backend/expenseiq
+
+# Load the env vars for this one-off run
+set -a; source ../expenseiq.env; set +a
+
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py createsuperuser   # optional: for the /admin panel
+```
+
+### Quick test
+
+```bash
+gunicorn expenseiq.wsgi --bind 0.0.0.0:8000
+```
+
+On your PC browser open `http://YOUR_IP:8000/api/` — you should get a DRF response (a 401/permission page is fine, it means Django is alive). Press `Ctrl+C` on the server to stop.
+
+> [!TIP]
+> Port 8000 isn't open in your security group, so that test may not load from outside — that's expected. If it fails, test on the server instead: `curl http://localhost:8000/api/`. Caddy (Step 8) will expose the app properly on 443.
+
+---
+
+## Step 8 — Run Gunicorn as a service + Caddy for HTTPS
+
+### 8a. Free domain (DuckDNS)
+
+Android blocks plain HTTP by default, so you want real HTTPS. Free + instant:
+
+1. On your PC go to **https://www.duckdns.org**, sign in with GitHub/Google
+2. Create a subdomain, e.g. `expenseiq` → gives you `expenseiq.duckdns.org`
+3. In the **current ip** box put **`YOUR_IP`** → click **update ip**
+
+Now go back and edit `expenseiq.env` if you used a placeholder — make sure `ALLOWED_HOSTS` includes `expenseiq.duckdns.org`.
+
+### 8b. Gunicorn systemd service
+
+Create the service file:
+
+```bash
+sudo nano /etc/systemd/system/expenseiq.service
+```
+
+Paste (uses your exact nested path and the `expenseiq.wsgi` module from your Procfile):
+
+```ini
+[Unit]
+Description=ExpenseIQ Gunicorn
+After=network.target postgresql.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/expenseiq/expenseiq/backend/expenseiq
+EnvironmentFile=/home/ubuntu/expenseiq/expenseiq/backend/expenseiq.env
+ExecStart=/home/ubuntu/expenseiq/expenseiq/backend/venv/bin/gunicorn \
+    expenseiq.wsgi:application \
+    --bind 127.0.0.1:8000 \
+    --workers 3
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save and start it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable expenseiq
+sudo systemctl start expenseiq
+sudo systemctl status expenseiq   # should say "active (running)"
+```
+
+### 8c. Caddy reverse proxy (automatic HTTPS)
+
+Caddy fetches and renews a free Let's Encrypt certificate on its own — no manual cert steps.
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
+
+Configure it:
+
+```bash
+sudo nano /etc/caddy/Caddyfile
+```
+
+Replace the entire contents with (use your real domain):
+
+```
+expenseiq.duckdns.org {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+Reload:
+
+```bash
+sudo systemctl reload caddy
+```
+
+Wait ~30 seconds for the certificate, then on your PC open:
+
+```
+https://expenseiq.duckdns.org/api/
+```
+
+HTTPS + a DRF response = **backend is live**. 🎉
+
+> [!NOTE]
+> `WhiteNoise` (already in your `settings.py`) serves the static/admin CSS, so `/admin/` will look correct through Caddy with no extra config.
+
+---
+
+## Step 9 — Set a billing alarm (do NOT skip)
+
+1. Console search **Billing** → open **Billing and Cost Management**
+2. Left menu → **Budgets** → **Create budget**
+3. Choose **Zero spend budget** (template) — emails you the moment any charge appears
+4. Enter your email → **Create budget**
+
+Optional stricter alarm: **Budgets** → **Customize** → set a **$1.00** monthly cost budget with an alert at 100%.
+
+---
+
+## Step 10 — Point the Flutter app at AWS
+
+On your **PC**, in the Flutter project, rebuild the release APK aimed at the new URL. Your app reads the API URL from a `--dart-define` (per your existing setup):
+
+```powershell
+cd d:\expenseiq\expenseiq\flutter_app
+flutter build apk --release --dart-define=API_URL=https://expenseiq.duckdns.org/api
+```
+
+Install `build\app\outputs\flutter-apk\app-release.apk` on a phone and test: **register → add transaction → logout → login again → data still there.**
+
+> [!TIP]
+> If the app can't reach the server, check in order: (1) `sudo systemctl status expenseiq` running? (2) `sudo journalctl -u expenseiq -n 50` for Python errors — usually `ALLOWED_HOSTS` missing the domain, or a wrong `DATABASE_URL`. (3) Caddy: `sudo systemctl status caddy` and `sudo journalctl -u caddy -n 50`.
+
+---
+
+## Updating the app later (redeploy)
+
+When you push new code to GitHub, update the server:
+
+```bash
+ssh -i expenseiq-key.pem ubuntu@YOUR_IP
+
+cd ~/expenseiq
+git pull
+cd expenseiq/backend
+source venv/bin/activate
+pip install -r requirements.txt          # only if deps changed
+cd expenseiq
+set -a; source ../expenseiq.env; set +a
+python manage.py migrate
+python manage.py collectstatic --noinput
+sudo systemctl restart expenseiq
+```
+
+---
+
+## Migrating your existing Railway data (optional)
+
+If you want to keep the transactions already on Railway:
+
+**On your PC**, with the old Railway `DATABASE_URL`, dump the data:
+
+```powershell
+# from d:\expenseiq\expenseiq\backend\expenseiq, venv active, DATABASE_URL pointing at Railway
+python manage.py dumpdata --natural-foreign --natural-primary ^
+  -e contenttypes -e auth.permission -e admin.logentry ^
+  -e sessions.session --indent 2 -o railway_dump.json
+```
+
+Copy it to the server and load it:
+
+```powershell
+scp -i $HOME\Downloads\expenseiq-key.pem railway_dump.json ubuntu@YOUR_IP:/home/ubuntu/
+```
+
+```bash
+# on the server
+mv ~/railway_dump.json ~/expenseiq/expenseiq/backend/expenseiq/
+cd ~/expenseiq/expenseiq/backend/expenseiq
+set -a; source ../expenseiq.env; set +a
+python manage.py loaddata railway_dump.json
+```
+
+---
+
+## Cheat sheet
+
+| Task | Command (on the server) |
+|---|---|
+| Log in | `ssh -i expenseiq-key.pem ubuntu@YOUR_IP` |
+| Restart backend | `sudo systemctl restart expenseiq` |
+| Backend logs | `sudo journalctl -u expenseiq -f` |
+| Reload web server | `sudo systemctl reload caddy` |
+| DB shell | `sudo -u postgres psql expenseiq` |
+| Manual DB backup | `pg_dump -U expenseiq_user -h localhost expenseiq > backup.sql` |
+
+---
+
+## When free tier ends (12 months out)
+
+- **t3.micro** then costs roughly **$7–9/month** (region-dependent) — your billing alarm will warn you first.
+- Cheaper alternatives at that point: **AWS Lightsail** ($3.50–5/month, simpler), **Oracle Cloud Always Free** (genuinely free small VM, no expiry), or back to **Railway/Render** hobby tiers.
+- To stop all charges: **terminate** the EC2 instance **and release** the Elastic IP.
